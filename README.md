@@ -63,9 +63,14 @@ bypassing CAPTCHA/bot-detection.
   service-role key, so only that key should ever be used against these
   tables (the anon/public key currently has full read/write access; revisit
   if any client-side/browser code is ever pointed at this project).
-  `pipeline/orchestrator.py` still returns in-memory `FddFiling`/`ItemRow`
-  objects rather than writing to Supabase — add a thin `db.py` using the
-  `supabase` client to insert `fdd_filings`/`units`/`franchisees` rows.
+  `pipeline/db.py` now writes `franchisors`/`fdd_filings`/`franchisees`/
+  `units`/`handler_registry` rows via the `supabase` client, and
+  `pipeline/orchestrator.load_filing_to_db()` ties Step 3.6/3.7 together:
+  it refuses to write `units` when the Table 1 hard gate flagged the filing
+  for review, and otherwise resolves each row's franchisee (fuzzy match,
+  escalating to Agent 2 on an ambiguous score) before loading. Tested
+  against a fake in-memory Supabase client (`tests/fake_supabase.py`) — no
+  network required to run the suite.
 - **`handler_registry` and `confidence` thresholds are in-process only** —
   `handler_registry` table in `sql/schema.sql` exists for persistence, but
   `pipeline/parsing/handler_registry.py`'s `HandlerRegistry` doesn't yet

@@ -17,12 +17,14 @@ from pipeline.parsing.format_detection import (
     locate_item_20_section,
     structural_fingerprint,
 )
+from pipeline.parsing.franchisee_field import split_franchisee_field
 from pipeline.parsing.handler_registry import registry
 from pipeline.parsing.ocr_gate import ocr_pdf_to_text
 from pipeline.parsing.table1_crosscheck import apply_crosscheck
-from pipeline.models import FddFiling
+from pipeline.models import FddFiling, FranchiseeCandidate, ItemRow
 from pipeline.portals.mn import MnPortalClient
 from pipeline.portals.wi import WiPortalClient
+from pipeline.resolution.entity_resolution import resolve, ResolutionOutcome
 
 log = logging.getLogger(__name__)
 
@@ -84,3 +86,66 @@ def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
         registry.record_clean_run(handler.id)  # advances agent-drafted handlers off probation
 
     return filing, rows
+
+
+def resolve_row_franchisee(client, row: ItemRow, cached_franchisees: dict[str, str]) -> str:
+    """Step 3.7 for one Item 20 row: split the franchisee field, fuzzy-match
+    against existing franchisees, escalate to Agent 2 if ambiguous, upsert,
+    and return the resulting franchisee_id. `cached_franchisees` (id -> name)
+    is mutated in place so later rows in the same filing see earlier upserts.
+    """
+    from pipeline import db
+
+    legal_name, guarantors = split_franchisee_field(row.franchisee_raw)
+    candidate = FranchiseeCandidate(legal_name=legal_name, guarantor_names=guarantors)
+
+    result = resolve(legal_name, cached_franchisees)
+
+    if result.outcome == ResolutionOutcome.NEW_ENTITY:
+        franchisee_id = db.upsert_franchisee(client, candidate)
+    elif result.outcome == ResolutionOutcome.AUTO_MERGE:
+        franchisee_id = db.upsert_franchisee(client, candidate, franchisee_id=result.matched_franchisee_id)
+    else:  # AMBIGUOUS -> Agent 2 tiebreaks; merge_confidence persisted either way
+        from pipeline.agents.entity_tiebreaker import tiebreak
+
+        matched_name = cached_franchisees[result.matched_franchisee_id]
+        verdict = tiebreak(legal_name, matched_name, result.score)
+        candidate.merge_confidence = verdict["confidence"]
+        if verdict["same_entity"]:
+            franchisee_id = db.upsert_franchisee(client, candidate, franchisee_id=result.matched_franchisee_id)
+        else:
+            franchisee_id = db.upsert_franchisee(client, candidate)
+
+    cached_franchisees[franchisee_id] = legal_name
+    return franchisee_id
+
+
+def load_filing_to_db(client, franchisor_name: str, franchisor_website: str | None, filing: FddFiling, rows: list[ItemRow]) -> str:
+    """Step 3.6/3.7: write a parsed filing to Supabase. Refuses to load units
+    if the Table 1 hard gate flagged the filing for review — the fdd_filings
+    row is still written (with review_flag=True) so it shows up for review,
+    but no units/franchisees are touched.
+    """
+    from pipeline import db
+
+    franchisor_id = db.upsert_franchisor(client, franchisor_name, franchisor_website)
+    filing.franchisor_name = franchisor_name
+    fdd_filing_id = db.insert_fdd_filing(client, filing, franchisor_id)
+
+    if filing.handler_id_used:
+        handler = registry.get(filing.handler_id_used)
+        if handler is not None:
+            db.sync_handler_registry(client, handler)
+
+    if filing.review_flag:
+        log.warning(
+            "Filing %s flagged for review (parsed=%s, table1=%s) — units not loaded.",
+            fdd_filing_id, filing.parsed_row_count, filing.table1_outlet_count,
+        )
+        return fdd_filing_id
+
+    cached_franchisees = db.fetch_all_franchisees(client)
+    franchisee_ids = [resolve_row_franchisee(client, row, cached_franchisees) for row in rows]
+    db.insert_units(client, rows, fdd_filing_id, franchisor_id, franchisee_ids)
+
+    return fdd_filing_id
