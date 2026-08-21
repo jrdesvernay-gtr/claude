@@ -56,11 +56,16 @@ bypassing CAPTCHA/bot-detection.
   written against the portals' known public workflow but the exact
   form-field names and result-table selectors (marked `TODO`) need
   confirming against the live DOM before the first real run.
-- **Supabase wiring is not connected.** `sql/schema.sql` is ready to apply;
-  the orchestrator currently returns in-memory `FddFiling`/`ItemRow`
+- **Supabase project is provisioned and schema applied** — project
+  `kgbpftfwbvaxzhjjrehx` ("Relay - Franchisee", us-east-1). All 5 tables,
+  the rollup trigger, and `franchisee_units_view` are live. RLS is
+  intentionally left disabled — this pipeline runs server-side with the
+  service-role key, so only that key should ever be used against these
+  tables (the anon/public key currently has full read/write access; revisit
+  if any client-side/browser code is ever pointed at this project).
+  `pipeline/orchestrator.py` still returns in-memory `FddFiling`/`ItemRow`
   objects rather than writing to Supabase — add a thin `db.py` using the
-  `supabase` client to insert `fdd_filings`/`units`/`franchisees` rows once
-  a project is provisioned.
+  `supabase` client to insert `fdd_filings`/`units`/`franchisees` rows.
 - **`handler_registry` and `confidence` thresholds are in-process only** —
   `handler_registry` table in `sql/schema.sql` exists for persistence, but
   `pipeline/parsing/handler_registry.py`'s `HandlerRegistry` doesn't yet
