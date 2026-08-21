@@ -56,8 +56,6 @@ bypassing CAPTCHA/bot-detection.
   written against the portals' known public workflow but the exact
   form-field names and result-table selectors (marked `TODO`) need
   confirming against the live DOM before the first real run.
-- **`wendys-top50-multiunit-franchisees.csv` is missing** — see
-  `data/reference/README.md`.
 - **Supabase wiring is not connected.** `sql/schema.sql` is ready to apply;
   the orchestrator currently returns in-memory `FddFiling`/`ItemRow`
   objects rather than writing to Supabase — add a thin `db.py` using the
