@@ -77,13 +77,25 @@ def compile_handler_code(code: str, source_label: str = "") -> HandlerFn:
     if "def parse(" not in code:
         raise ValueError(f"Handler code did not define a parse() function{source_label}: {code[:500]!r}")
 
+    # A SINGLE dict serves as both globals and locals -- confirmed live this
+    # matters: exec(code, globals_dict, locals_dict) with two SEPARATE dicts
+    # puts top-level assignments (e.g. a module-level regex constant like
+    # STATE_ZIP_RE = re.compile(...)) into locals_dict, but a nested
+    # function's free-variable lookups always go through its __globals__
+    # (globals_dict) -- so parse() would raise NameError the moment it
+    # referenced any module-level constant defined alongside it, even
+    # though both are right there in the same source. This silently broke
+    # a real drafted Taco Bell handler that used module-level constants
+    # (STREET_SUFFIXES, STATE_ZIP_RE, etc.) for exactly the kind of
+    # well-structured code this task calls for -- every line's parse
+    # silently failed via the per-line try/except below, producing 0 rows
+    # with no visible error anywhere in the pipeline.
     sandbox_globals = {
         "__builtins__": {**_SAFE_BUILTINS, "__import__": _restricted_import},
         "re": re,
     }
-    sandbox_locals: dict = {}
     try:
-        exec(code, sandbox_globals, sandbox_locals)  # noqa: S102 - sandboxed namespace, reviewed above
+        exec(code, sandbox_globals)  # noqa: S102 - sandboxed namespace, reviewed above
     except SyntaxError as exc:
         # Confirmed live: a drafted handler can have a genuine syntax error
         # (unterminated string literal), most likely from embedding a
@@ -93,7 +105,7 @@ def compile_handler_code(code: str, source_label: str = "") -> HandlerFn:
         # actual broken code instead of letting a bare SyntaxError propagate
         # with no way to see what it looked like.
         raise ValueError(f"Handler code has invalid Python syntax{source_label}: {exc}\nCode:\n{code[:2000]}") from exc
-    raw_fn = sandbox_locals["parse"]
+    raw_fn = sandbox_globals["parse"]
 
     def fn(item_20_text: str) -> list[ItemRow]:
         return [ItemRow(**row) for row in raw_fn(item_20_text)]

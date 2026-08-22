@@ -115,3 +115,32 @@ def test_drafted_code_using_isinstance_executes():
         handler_id, fn = draft_handler("WI", "Alpha\tx\n", {"delimiter": "tab"})
     rows = fn("Alpha\tx\n")
     assert rows and rows[0].franchisee_raw == "Alpha"
+
+
+CODE_USING_MODULE_LEVEL_CONSTANT = """
+STOP_WORDS = {"IGNORE", "SKIP"}
+
+def parse(item_20_text: str) -> list[dict]:
+    rows = []
+    for line in item_20_text.splitlines():
+        line = line.strip()
+        if not line or line.upper() in STOP_WORDS:
+            continue
+        rows.append({"franchisee_raw": line.split(" ")[0]})
+    return rows
+"""
+
+
+def test_drafted_code_using_a_module_level_constant_inside_parse_works():
+    # Confirmed live: exec(code, globals_dict, locals_dict) with two
+    # SEPARATE dicts put a module-level constant (e.g. a compiled regex)
+    # into locals_dict, but parse()'s free-variable lookups go through its
+    # __globals__ (globals_dict) -- so referencing that constant raised
+    # NameError, silently swallowed by the drafted handler's own per-line
+    # try/except, producing 0 rows with no visible error anywhere. A real
+    # Taco Bell handler that defined STREET_SUFFIXES/STATE_ZIP_RE etc. at
+    # module scope hit exactly this.
+    with patch(COMPLETE, return_value=CODE_USING_MODULE_LEVEL_CONSTANT):
+        handler_id, fn = draft_handler("WI", "Alpha Beta\n", {"delimiter": "fixed_width"})
+    rows = fn("Alpha Beta\nGamma\n")
+    assert [row.franchisee_raw for row in rows] == ["Alpha", "Gamma"]
