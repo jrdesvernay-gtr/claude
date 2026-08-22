@@ -38,10 +38,18 @@ def is_text_native(extracted_text: str, min_chars: int = 200) -> bool:
 #
 # A "licensee" system (confirmed live: Taco Bell) uses different vocabulary
 # throughout -- "ITEM 20 UNITS AND LICENSEE INFORMATION" -- so match both.
+#
+# Case-insensitive: confirmed live that Taco Bell's real Item 20 heading
+# renders as "Item 20" (title case), not "ITEM 20" -- only the rest of the
+# line ("UNITS AND LICENSEE INFORMATION") is actually all-caps. A
+# case-sensitive match silently found nothing for Taco Bell, so
+# locate_item_20_section() returned None and the section-locator agent
+# never saw any Item 20 body text at all.
 ITEM_20_HEADER_RE = re.compile(
-    r"ITEM\s*20\s+(?:OUTLETS|UNITS)\s+AND\s+(?:FRANCHISEE|LICENSEE)\s+INFORMATION"
+    r"ITEM\s*20\s+(?:OUTLETS|UNITS)\s+AND\s+(?:FRANCHISEE|LICENSEE)\s+INFORMATION",
+    re.IGNORECASE,
 )
-ITEM_21_HEADER_RE = re.compile(r"\bITEM\s*21\b")
+ITEM_21_HEADER_RE = re.compile(r"\bITEM\s*21\b", re.IGNORECASE)
 TABLE1_HEADER_RE = re.compile(
     r"table\s*(no\.?)?\s*1.{0,80}?systemwide\s+outlet\s+summary", re.IGNORECASE | re.DOTALL
 )
