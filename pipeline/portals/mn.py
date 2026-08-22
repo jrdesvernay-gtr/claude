@@ -83,10 +83,17 @@ class MnPortalClient:
         # connections (analytics, etc.).
         page.get_by_role("button", name="Export").wait_for()
 
+        # Locate the header row by known content, and substring-match the
+        # "Year" column, in case the live header includes a sort-order glyph
+        # (confirmed to happen on WI's equivalent "Effective Date" column;
+        # MN's "Year" header shows sort arrows in the UI too) that would
+        # break an exact-match lookup.
         table = page.locator("table").first
         header_cells = table.locator("tr").first.locator("th, td").all_inner_texts()
-        col_index = {h.strip().lower(): i for i, h in enumerate(header_cells)}
-        year_idx = col_index.get("year")
+        year_idx = next(
+            (i for i, h in enumerate(header_cells) if h.strip().lower().startswith("year")),
+            None,
+        )
 
         hits: list[SearchHit] = []
         seen_file_numbers: set[str] = set()

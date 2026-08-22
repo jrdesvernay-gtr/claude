@@ -74,9 +74,17 @@ class WiPortalClient:
                     # persistent background connections (analytics, etc.)
                     page.get_by_text("Results Count:").wait_for()
 
-                    header_cells = page.locator("table tr").first.locator("th, td").all_inner_texts()
-                    col_index = {h.strip().lower(): i for i, h in enumerate(header_cells)}
-                    effective_idx = col_index.get("effective date")
+                    # Locate the header row by known content rather than assuming
+                    # it's the page's first <tr> (the page may have other
+                    # layout tables ahead of the results grid), and substring-
+                    # match the date column since the live header cell includes
+                    # a sort-order glyph (e.g. "Effective Date▼"), which
+                    # breaks an exact-match lookup.
+                    header_cells = page.locator("tr", has_text="File Number").first.locator("th, td").all_inner_texts()
+                    effective_idx = next(
+                        (i for i, h in enumerate(header_cells) if "effective date" in h.strip().lower()),
+                        None,
+                    )
 
                     rows = page.locator("table tr").all()
                     for row in rows:
