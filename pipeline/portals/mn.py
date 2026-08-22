@@ -75,8 +75,14 @@ class MnPortalClient:
     def _search_one_document_type(self, page, franchisor_name: str, doc_type: str) -> list[SearchHit]:
         page.set_default_timeout(30_000)
         page.goto(BASE_URL)
-        page.get_by_label("Franchisor:").fill(franchisor_name)
-        page.get_by_label("Document type:").select_option(label=doc_type)
+        # Like WI's "Name (Legal or Trade):" field, MN's "Franchisor:" text
+        # isn't wrapped in a real <label> either (confirmed live --
+        # get_by_label times out), so target fields positionally instead.
+        # Form field order: Document, Franchisor, Franchise name, Year,
+        # File number, [Document type dropdown], Content search -- so
+        # Franchisor is the 2nd text input, and there's only one <select>.
+        page.get_by_role("textbox").nth(1).fill(franchisor_name)
+        page.locator("select").first.select_option(label=doc_type)
         page.get_by_role("button", name="Search").click()
         # Wait for the results view's "Export (CSV)" button rather than
         # "networkidle", which can hang on pages with persistent background
