@@ -21,6 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from pipeline.parsing.format_detection import (  # noqa: E402
     find_referenced_exhibit_letters,
     is_text_native,
+    locate_exhibit_section,
     locate_franchisee_list_section,
     structural_fingerprint,
 )
@@ -65,17 +66,32 @@ def inspect(pdf_path: Path) -> None:
     letters = find_referenced_exhibit_letters(full_text)
     print(f"  Referenced exhibit letter(s): {letters or '(none found)'}")
 
-    result = locate_franchisee_list_section(full_text)
-    if result is None:
-        print("  Franchisee list section NOT FOUND (neither a referenced exhibit nor Item 20's own body).")
-        out_path = pdf_path.with_suffix(".fulltext.txt")
-        out_path.write_text(full_text)
-        print(f"  Saved full extracted text to {out_path} for manual inspection.")
+    if not letters:
+        result = locate_franchisee_list_section(full_text)
+        if result is None:
+            print("  Franchisee list section NOT FOUND (neither a referenced exhibit nor Item 20's own body).")
+            out_path = pdf_path.with_suffix(".fulltext.txt")
+            out_path.write_text(full_text)
+            print(f"  Saved full extracted text to {out_path} for manual inspection.")
+            return
+        show_section(pdf_path, *result)
         return
 
-    section_text, source_label = result
+    # Show EVERY referenced exhibit, not just the first that resolves --
+    # confirmed live (Wendy's Exhibit P) that "first resolvable" can be a
+    # small unrelated exhibit (2 pages, looks like a departures list) while
+    # the real multi-thousand-row roster is a different referenced letter.
+    for letter in letters:
+        section = locate_exhibit_section(full_text, letter)
+        if section is None:
+            print(f"  Exhibit {letter}: heading not found in document.")
+            continue
+        show_section(pdf_path, section, f"exhibit_{letter}")
+
+
+def show_section(pdf_path: Path, section_text: str, source_label: str) -> None:
     lines = section_text.splitlines()
-    print(f"  Located via: {source_label}")
+    print(f"\n  === {source_label} ===")
     print(f"  Section: {len(lines)} lines, {len(section_text)} chars")
 
     fp = structural_fingerprint(section_text)
@@ -85,14 +101,12 @@ def inspect(pdf_path: Path) -> None:
     out_path.write_text(section_text)
     print(f"  Saved full section text to {out_path}")
 
-    item_20_text = section_text
-
-    print(f"\n  --- First {PREVIEW_LINES} lines ---")
+    print(f"  --- First {PREVIEW_LINES} lines ---")
     for line in lines[:PREVIEW_LINES]:
         print(f"  {line!r}")
 
     if len(lines) > PREVIEW_LINES:
-        print(f"\n  --- Last 10 lines (often the Table No. 1 summary) ---")
+        print(f"  --- Last 10 lines ---")
         for line in lines[-10:]:
             print(f"  {line!r}")
 
