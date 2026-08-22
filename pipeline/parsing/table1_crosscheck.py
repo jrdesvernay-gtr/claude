@@ -17,25 +17,54 @@ from __future__ import annotations
 import re
 
 from pipeline.models import FddFiling, ItemRow
+from pipeline.parsing.format_detection import TABLE1_HEADER_RE
 
-# Table 1 typically ends with a "Totals" row giving the systemwide outlet count.
-TOTAL_ROW_RE = re.compile(
-    r"total.{0,40}?(\d[\d,]{2,})\s*$", re.IGNORECASE | re.MULTILINE
-)
+# Confirmed live: Item 20's body has SEVERAL different tables (Table No. 1
+# Systemwide Outlet Summary, plus Transfers, franchised-outlet-status-change,
+# state-by-state breakdowns, etc.), each with its own "Total ... NNN" row.
+# Searching for "total...NNN" anywhere in the whole body and taking the last
+# match picked up numbers from the WRONG table entirely -- e.g. McDonald's
+# real Table No. 1 shows "Total Outlets 2023 13,455 ... 2025 ...", but the
+# old unscoped search returned 685 (actually a Company-Owned count from a
+# nearby but different line); Wendy's real Table 1 shows "Total Outlets 2023
+# 5,994 6,030 ...", but the old search returned 4033 from an unrelated
+# by-state sub-table. Scope the search to right after the real Table No. 1 /
+# Systemwide Outlet Summary heading, look specifically for "Total Outlets"
+# (not just "total"), and take the largest number found there (pdfplumber's
+# column-merge interleaving mixes several years' start/end/change figures
+# into one line -- the true outlet count is the largest of them, not
+# necessarily the first or last).
+TOTAL_OUTLETS_RE = re.compile(r"total\s+outlets(.{0,300})", re.IGNORECASE | re.DOTALL)
+NEXT_TABLE_HEADER_RE = re.compile(r"table\s*(no\.?)?\s*\d+", re.IGNORECASE)
 
 
 def extract_table1_outlet_count(item_20_text: str) -> int | None:
     """Best-effort extraction of Table No. 1's disclosed systemwide outlet
-    total from the raw exhibit text. Returns None if it can't be found —
+    total from Item 20's own body text. Returns None if it can't be found —
     callers should treat that as "cannot verify" and flag for review rather
     than assume a match.
     """
-    m = None
-    for m in TOTAL_ROW_RE.finditer(item_20_text):
-        pass  # keep the last "Total" match — Table 1 usually ends with the grand total
+    header = TABLE1_HEADER_RE.search(item_20_text)
+    if header is None:
+        return None
+
+    window_start = header.end()
+    next_table = NEXT_TABLE_HEADER_RE.search(item_20_text, window_start)
+    window_end = next_table.start() if next_table else min(len(item_20_text), window_start + 3000)
+    window = item_20_text[window_start:window_end]
+
+    m = TOTAL_OUTLETS_RE.search(window)
     if m is None:
         return None
-    return int(m.group(1).replace(",", ""))
+
+    numbers = [int(n.replace(",", "")) for n in re.findall(r"\d[\d,]{2,}", m.group(1))]
+    # A 4-digit year (e.g. "2024") sitting in the same row reads like a
+    # plausible outlet count -- exclude it rather than risk picking it as
+    # the max.
+    candidates = [n for n in numbers if not (2000 <= n <= 2099)]
+    if not candidates:
+        return None
+    return max(candidates)
 
 
 def apply_crosscheck(filing: FddFiling, parsed_rows: list[ItemRow], item_20_text: str) -> FddFiling:
