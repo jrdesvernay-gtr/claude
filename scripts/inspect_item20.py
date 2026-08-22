@@ -38,6 +38,17 @@ def extract_full_text(pdf_path: Path) -> str:
     return "\n".join(parts)
 
 
+def show_all_item20_occurrences(full_text: str) -> None:
+    import re
+
+    print("  --- All 'item 20' occurrences (context) ---")
+    for m in re.finditer(r"item\s*20", full_text, re.IGNORECASE):
+        start = max(0, m.start() - 30)
+        end = min(len(full_text), m.end() + 30)
+        snippet = full_text[start:end].replace("\n", "\\n")
+        print(f"    @{m.start()}: ...{snippet}...")
+
+
 def inspect(pdf_path: Path) -> None:
     print(f"\n{'=' * 70}\n{pdf_path.name}\n{'=' * 70}")
 
@@ -47,6 +58,8 @@ def inspect(pdf_path: Path) -> None:
     if not is_text_native(full_text):
         print("  NOT text-native -- looks scanned, needs the OCR gate (not run by this script).")
         return
+
+    show_all_item20_occurrences(full_text)
 
     item_20_text = locate_item_20_section(full_text)
     if item_20_text is None:
