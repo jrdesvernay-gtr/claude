@@ -17,13 +17,24 @@ def get_client():
     return anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from env
 
 
-def complete(system: str, user: str, max_tokens: int = 2048) -> str:
+def complete(system: str, user: str, max_tokens: int = 2048, effort: str = "medium") -> str:
+    # claude-sonnet-5 runs adaptive thinking by default even without an
+    # explicit `thinking` param, and budget_tokens (the old way to cap
+    # thinking spend) is rejected outright on this model -- confirmed live:
+    # draft_handler() repeatedly hit stop_reason='max_tokens' with a
+    # 'thinking' block consuming the entire budget before any code was
+    # emitted, and raising max_tokens alone (512 -> 1024 -> 2048 -> 8192)
+    # never reliably fixed it. output_config.effort is the actual lever for
+    # thinking depth on this model; "medium" trades some reasoning depth for
+    # headroom to reliably finish. Callers with a genuinely simple/short
+    # task can still pass effort="low".
     client = get_client()
     resp = client.messages.create(
         model=_MODEL,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user}],
+        output_config={"effort": effort},
     )
     text = "".join(block.text for block in resp.content if block.type == "text")
     if not text:

@@ -90,12 +90,14 @@ Respond with ONLY a JSON object:
 
 
 def locate_franchisee_list_via_agent(locator_context: str) -> dict:
-    # Confirmed live: 1024 wasn't a safe floor either -- McDonald's hit the
-    # same truncated-before-JSON-closed failure Wendy's did earlier at 512.
-    # Raised further, and the raw response is now included in the fail-safe
-    # reasoning below so a repeat doesn't again require a blind guess at
-    # the cause.
-    raw = complete(SYSTEM_PROMPT, locator_context, max_tokens=2048)
+    # Confirmed live: repeatedly raising max_tokens alone (512 -> 1024 ->
+    # 2048) didn't reliably fix truncation -- the real lever is thinking
+    # depth (see client.complete()'s effort param). This is a location
+    # decision from a handful of short text snippets, not a task that
+    # needs deep reasoning, so effort="low" both avoids the truncation and
+    # is cheaper. The raw response is included in the fail-safe reasoning
+    # below so a repeat doesn't again require a blind guess at the cause.
+    raw = complete(SYSTEM_PROMPT, locator_context, max_tokens=2048, effort="low")
     result = _extract_json_object(raw)
     if result is None:
         # fail safe: report not_found rather than guessing
@@ -126,7 +128,9 @@ Respond with ONLY a JSON object:
 
 
 def verify_franchisee_list_via_agent(preview_text: str) -> dict:
-    raw = complete(VERIFY_SYSTEM_PROMPT, preview_text, max_tokens=512)
+    # A yes/no classification over 20 lines of text -- effort="low" per the
+    # same reasoning as the locate call above.
+    raw = complete(VERIFY_SYSTEM_PROMPT, preview_text, max_tokens=512, effort="low")
     result = _extract_json_object(raw)
     if result is None:
         # fail safe: don't trust an unparseable verification

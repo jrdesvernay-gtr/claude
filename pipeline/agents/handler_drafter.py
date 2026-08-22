@@ -95,13 +95,16 @@ def draft_handler(state: str, item_20_sample: str, fingerprint: dict) -> tuple[s
         f"Structural fingerprint: {fingerprint}\n\n"
         f"Sample Item 20 text (may be truncated):\n{item_20_sample[:6000]}"
     )
-    # Confirmed live: Taco Bell's messier, irregular fixed-width format
-    # (combined state field, optional phone, multi-word entity names) made
-    # the model spend its entire budget on internal reasoning ("thinking"
-    # block) and hit max_tokens before emitting any actual code -- the
-    # default budget is fine for simple formats but not a safe floor once
-    # the reasoning itself gets long.
-    raw = complete(SYSTEM_PROMPT, user_prompt, max_tokens=8192)
+    # Confirmed live: messier, irregular formats (e.g. Taco Bell's combined
+    # state field, optional phone, multi-word entity names) repeatedly made
+    # the model spend its whole budget on internal reasoning and hit
+    # max_tokens before emitting code, or before finishing it (Wendy's got
+    # a real drafted function cut off mid-string). Raising max_tokens alone
+    # wasn't a reliable fix -- client.complete()'s default effort="medium"
+    # is the actual lever for thinking depth on this model; max_tokens is
+    # raised too, to the ~16000 the Anthropic API guide recommends as a
+    # non-streaming default, purely for extra headroom on top of that.
+    raw = complete(SYSTEM_PROMPT, user_prompt, max_tokens=16000)
     code = _extract_code(raw)
 
     if _FORBIDDEN.search(code):
