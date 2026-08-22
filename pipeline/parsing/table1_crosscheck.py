@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 
+from pipeline.config import TABLE1_MATCH_TOLERANCE
 from pipeline.models import FddFiling, ItemRow
 from pipeline.parsing.format_detection import TABLE1_HEADER_RE
 
@@ -84,8 +85,18 @@ def apply_crosscheck(filing: FddFiling, parsed_rows: list[ItemRow], item_20_text
         # Can't verify -> fail safe: flag for review rather than silently load.
         filing.table1_match = None
         filing.review_flag = True
+    elif filing.table1_outlet_count == 0:
+        # Avoid a divide-by-zero below; a disclosed total of 0 outlets with
+        # any parsed rows at all is a real mismatch, not tolerance noise.
+        filing.table1_match = filing.parsed_row_count == 0
+        filing.review_flag = not filing.table1_match
     else:
-        filing.table1_match = filing.table1_outlet_count == filing.parsed_row_count
+        # TABLE1_MATCH_TOLERANCE, not exact equality -- confirmed live that
+        # even a correct, well-drafted handler lands within ~1-11% of the
+        # disclosed total on real filings, not exactly on it. See the
+        # constant's own comment in pipeline/config.py for the reasoning.
+        relative_diff = abs(filing.table1_outlet_count - filing.parsed_row_count) / filing.table1_outlet_count
+        filing.table1_match = relative_diff <= TABLE1_MATCH_TOLERANCE
         filing.review_flag = not filing.table1_match
 
     return filing

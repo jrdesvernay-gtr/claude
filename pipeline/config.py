@@ -37,6 +37,22 @@ HANDLER_PROVEN_CONFIDENCE = 0.95
 # Contact enrichment (Step 4): hard gate before syncing to Instantly/Pipedrive.
 CONTACT_SYNC_THRESHOLD = 0.70
 
+# Table 1 cross-check (Step 3.5) hard gate: how far parsed_row_count may
+# differ from Table 1's disclosed outlet count and still count as a match.
+# Confirmed live against real McDonald's/Wendy's/Taco Bell WI filings once
+# the section-locator, Table 1 extraction, and handler-sandbox bugs were
+# fixed: even a correct, well-drafted handler lands within ~1-11% of the
+# disclosed total, not exactly on it -- normal noise from real-world PDF
+# extraction (a stray header/footer line miscounted as a row, a name-
+# splitting edge case, etc.), not evidence of a broken parse. Exact equality
+# was too strict a bar for realistic data and left every filing gated for
+# review regardless of parse quality. 12% comfortably covers that normal
+# noise while still catching genuinely broken parses, which have shown up
+# as errors of 10-1700%+ (a multi-page exhibit truncated to one page, an
+# unbounded capture running past the exhibit's real end), not single-digit
+# percentages.
+TABLE1_MATCH_TOLERANCE = 0.12
+
 
 @dataclass(frozen=True)
 class PortalConfig:

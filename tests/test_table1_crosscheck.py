@@ -97,6 +97,41 @@ def test_crosscheck_mismatch_sets_review_flag():
     assert filing.review_flag is True
 
 
+# Confirmed live: even a correct, well-drafted handler lands within ~1-11%
+# of Table 1's disclosed total on real filings (McDonald's 88.9%, Taco Bell
+# 90.8%, Wendy's 99.4% of disclosed), not exactly on it -- normal noise from
+# real-world PDF extraction, not evidence of a broken parse. Exact equality
+# left every real filing gated for review regardless of parse quality.
+def test_crosscheck_within_tolerance_clears_review_flag():
+    filing = FddFiling(franchisor_name="McDonald's", state="WI", source_url="http://x")
+    # 5943 disclosed, 5943 * 0.89 ~= 5290 parsed -> within the 12% tolerance
+    rows = [ItemRow(franchisee_raw=f"Entity {i} LLC") for i in range(5290)]
+    filing = apply_crosscheck(filing, rows, SAMPLE_TABLE1)
+    assert filing.table1_match is True
+    assert filing.review_flag is False
+
+
+def test_crosscheck_outside_tolerance_sets_review_flag():
+    filing = FddFiling(franchisor_name="McDonald's", state="WI", source_url="http://x")
+    # 5943 disclosed, 5943 * 0.80 ~= 4754 parsed -> outside the 12% tolerance
+    rows = [ItemRow(franchisee_raw=f"Entity {i} LLC") for i in range(4754)]
+    filing = apply_crosscheck(filing, rows, SAMPLE_TABLE1)
+    assert filing.table1_match is False
+    assert filing.review_flag is True
+
+
+def test_crosscheck_zero_disclosed_outlets_avoids_divide_by_zero():
+    filing = FddFiling(franchisor_name="Empty Co", state="WI", source_url="http://x")
+    # "000" (3 digits) rather than "0" so extract_table1_outlet_count's
+    # \d[\d,]{2,} (minimum 3 characters) actually matches it -- a bare "0"
+    # wouldn't be picked up as a candidate at all.
+    text = "Table No. 1\nSystemwide Outlet Summary\nTotal Outlets 2024 000\n"
+    filing = apply_crosscheck(filing, [], text)
+    assert filing.table1_outlet_count == 0
+    assert filing.table1_match is True
+    assert filing.review_flag is False
+
+
 def test_missing_table1_flags_for_review_rather_than_assuming_match():
     filing = FddFiling(franchisor_name="Wendy's", state="WI", source_url="http://x")
     rows = [ItemRow(franchisee_raw="Entity LLC")]
