@@ -133,22 +133,33 @@ ROSTER_TITLE_KEYWORDS_RE = re.compile(
 
 
 def list_exhibit_titles(full_text: str) -> dict[str, str]:
-    """Best-effort map of exhibit letter -> title, scraped only from the
-    front matter (everything before Item 20's own real body heading).
-    Restricting to the front matter matters: a franchisor's FDD can have an
-    embedded document -- e.g. the franchise agreement itself, attached as
-    an exhibit -- with its own internal "EXHIBIT A/B/C..." heading list
-    deep in the document. Confirmed live: Taco Bell's attached franchise
-    agreement (Exhibit B) has its own nested Exhibits A-I for lease/deed/
-    etc. paperwork, which would otherwise be picked up as if they were the
-    FDD's own top-level exhibit list.
-    """
-    item_20_matches = list(ITEM_20_HEADER_RE.finditer(full_text))
-    boundary = item_20_matches[-1].start() if item_20_matches else len(full_text)
-    window = full_text[:boundary]
+    """Best-effort map of exhibit letter -> title, scanning the WHOLE
+    document and keeping the FIRST occurrence of each letter.
 
+    Confirmed live against the real Wendy's WI filing: an earlier version
+    of this function restricted the scan to before Item 20's own body
+    heading, on the assumption that a franchisor's own "list of exhibits"
+    always lives in the front matter alongside the main Item table of
+    contents. That assumption is false -- Wendy's real "list of exhibits"
+    (with real per-letter titles, e.g. "EXHIBIT O - OPERATING OUTLETS BY
+    STATE") comes AFTER Item 20's heading, apparently positioned just
+    ahead of the Exhibits themselves rather than bundled with the front
+    matter. The boundary caused this function to return nothing at all.
+
+    Taking the first occurrence of each letter (rather than scanning
+    unboundedly and letting a later match win) is the mitigation for the
+    known related risk: an embedded document within the FDD -- e.g. the
+    franchise agreement itself, attached as an exhibit -- can have its own
+    internal "EXHIBIT A/B/C..." heading list deep in the document
+    (confirmed live: Taco Bell's attached franchise agreement has its own
+    nested Exhibits A-I for lease/deed/etc. paperwork). As long as the
+    FDD's own top-level list of exhibits appears before that nested one,
+    first-occurrence-wins prefers the real title. This is still a
+    heuristic, not a guarantee -- see the module docstring for why the
+    real decision is agent-primary.
+    """
     titles: dict[str, str] = {}
-    lines = window.splitlines()
+    lines = full_text.splitlines()
     for i, line in enumerate(lines):
         m = EXHIBIT_HEADING_RE.match(line.strip())
         if not m:

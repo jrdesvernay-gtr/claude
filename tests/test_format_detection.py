@@ -180,21 +180,24 @@ def test_list_exhibit_titles():
     assert titles["R"].startswith("RESTAURANT CLOSURES")
 
 
-def test_list_exhibit_titles_excludes_nested_document_exhibits():
+def test_list_exhibit_titles_keeps_first_occurrence_over_nested_document_exhibits():
     # A franchise agreement attached as its own exhibit can have internal
-    # "EXHIBIT A/B/C..." headings for lease/deed paperwork, appearing after
-    # Item 20's real body -- must not be picked up as the FDD's own list.
+    # "EXHIBIT A/B/C..." headings for lease/deed paperwork reusing letters
+    # already used by the FDD's own top-level exhibits (confirmed live:
+    # Taco Bell's attached franchise agreement has its own nested Exhibits
+    # A-I). The FDD's own top-level list (appearing first) must win, not
+    # whichever nested mention comes later.
     text = SAMPLE_FDD_WENDYS_LIKE + """
 EXHIBIT Z
 FORM OF FRANCHISE AGREEMENT
-EXHIBIT A
+EXHIBIT O
 BILL OF SALE
-EXHIBIT B
+EXHIBIT P
 GENERAL RELEASE
 """
     titles = list_exhibit_titles(text)
-    assert "A" not in titles
-    assert "B" not in titles
+    assert titles["O"].startswith("OPERATING OUTLETS BY STATE")
+    assert titles["P"].startswith("RECENT TRANSFERS")
 
 
 # FDDs with more than 26 exhibits continue A..Z then AA, BB, ... -- a
