@@ -3,6 +3,7 @@ from pipeline.parsing.format_detection import (
     find_roster_exhibit_letter,
     gather_locator_context,
     list_exhibit_titles,
+    locate_exhibit_section,
     locate_franchisee_list_section_heuristic,
     locate_item_20_section,
 )
@@ -267,3 +268,57 @@ def test_gather_locator_context_respects_max_chars():
     text = "\n".join(f"EXHIBIT {chr(65 + i % 26)} some filler text here" for i in range(500))
     context = gather_locator_context(text, max_chars=500)
     assert len(context) <= 500
+
+
+# Mirrors the real McDonald's WI filing structure: a long roster exhibit
+# spanning multiple pages, each repeating its own heading ("EXHIBIT R" on
+# page 1, "EXHIBIT R (continued)" on every page after). An earlier version
+# of locate_exhibit_section() took the LAST occurrence of the heading
+# (written to skip a front-matter TOC mention), which for a document shaped
+# like this silently captured only the final page and none of the rest --
+# confirmed live: McDonald's parsed 24 rows against Table 1's disclosed 685.
+SAMPLE_FDD_MULTI_PAGE_EXHIBIT = """
+TABLE OF CONTENTS
+ITEM 20 OUTLETS AND FRANCHISEE INFORMATION ................................................................... 57
+ITEM 21 FINANCIAL STATEMENTS ........................................................................................... 60
+EXHIBIT R - LIST OF FRANCHISEES ........................................................................................... 200
+
+ITEM 20
+OUTLETS AND FRANCHISEE INFORMATION
+Table No. 1
+Systemwide Outlet Summary
+2024  500  20  520
+
+ITEM 21
+FINANCIAL STATEMENTS
+Some unrelated Item 21 body content here.
+
+EXHIBIT R
+NAME RESTAURANT ADDRESS TELEPHONE
+Franchisee One 100 Main St, Anytown, AL 205-555-0100
+
+EXHIBIT R (continued)
+Franchisee Two 200 Oak St, Anytown, AL 205-555-0200
+
+EXHIBIT R (continued)
+Franchisee Three 300 Elm St, Anytown, AL 205-555-0300
+
+EXHIBIT S
+UNRELATED DISCLOSURE
+Not part of the roster.
+"""
+
+
+def test_locate_exhibit_section_captures_every_page_of_a_multi_page_exhibit():
+    section = locate_exhibit_section(SAMPLE_FDD_MULTI_PAGE_EXHIBIT, "R")
+    assert section is not None
+    assert "Franchisee One" in section
+    assert "Franchisee Two" in section
+    assert "Franchisee Three" in section
+    assert "UNRELATED DISCLOSURE" not in section  # cut off before Exhibit S
+
+
+def test_locate_exhibit_section_skips_front_matter_toc_mention():
+    section = locate_exhibit_section(SAMPLE_FDD_MULTI_PAGE_EXHIBIT, "R")
+    assert section is not None
+    assert "LIST OF FRANCHISEES" not in section  # the TOC entry, not real content

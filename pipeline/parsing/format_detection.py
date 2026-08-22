@@ -143,20 +143,54 @@ def find_referenced_exhibit_letters(full_text: str) -> list[str]:
 
 
 def locate_exhibit_section(full_text: str, letter: str) -> str | None:
-    """Locate EXHIBIT {letter}'s section by its ALL-CAPS heading. Like Item
-    headings, an exhibit letter can appear earlier in a table of contents /
-    list of exhibits before the real heading, so take the LAST match. Runs
-    until the next "EXHIBIT {other letter}" or "ITEM {n}" heading, or EOF.
+    """Locate EXHIBIT {letter}'s FULL section by its ALL-CAPS heading --
+    every page of it, not just the first or last.
+
+    Two things confirmed live against real filings, pulling in opposite
+    directions:
+
+    1. An exhibit letter can appear earlier in a table of contents / list
+       of exhibits before the real heading (a front-matter mention with no
+       real content after it) -- so the search must skip past that, not
+       start there.
+    2. A long, multi-page exhibit repeats its OWN heading on every page
+       (e.g. literally "EXHIBIT R (continued)" -- confirmed live on
+       McDonald's real Exhibit R, and the reason an earlier "take the LAST
+       occurrence" version of this function silently captured only the
+       final page of a hundreds-of-rows roster and nothing before it,
+       passing every downstream check because that final page still looked
+       like genuine franchisee rows).
+
+    The fix: real exhibits always come after Item 20's own body heading in
+    FDD structure (Items first, Exhibits after), so search for the FIRST
+    occurrence starting there -- skipping the front-matter mention without
+    assuming "last occurrence" is safe. Run until a DIFFERENT exhibit
+    letter's heading or an ITEM heading, explicitly excluding further
+    occurrences of this SAME letter (a continuation-page repeat, not a
+    boundary) -- capturing every page of the exhibit, not just one.
     """
     heading_re = re.compile(rf"\bEXHIBIT\s+{re.escape(letter)}\b")
-    matches = list(heading_re.finditer(full_text))
+    item_20_matches = list(ITEM_20_HEADER_RE.finditer(full_text))
+    search_start = item_20_matches[-1].start() if item_20_matches else 0
+
+    matches = list(heading_re.finditer(full_text, search_start))
     if not matches:
-        return None
-    start = matches[-1].start()
+        # Rare fallback: no occurrence after Item 20 at all (e.g. Item 20
+        # detection itself failed) -- search the whole document instead of
+        # giving up.
+        matches = list(heading_re.finditer(full_text))
+        if not matches:
+            return None
+    start = matches[0].start()
+
     # 1-2 letter exhibit codes (A..Z, then AA, BB, ...) for the same reason
-    # as find_referenced_exhibit_letters above.
-    boundary_re = re.compile(r"\bEXHIBIT\s+[A-Z]{1,2}\b|\bITEM\s*\d+\b")
-    next_match = boundary_re.search(full_text, start + len(matches[-1].group()))
+    # as find_referenced_exhibit_letters above. Negative lookahead excludes
+    # this same letter so a continuation-page repeat of our own heading
+    # isn't mistaken for the next exhibit's boundary.
+    boundary_re = re.compile(
+        rf"\bEXHIBIT\s+(?!{re.escape(letter)}\b)[A-Z]{{1,2}}\b|\bITEM\s*\d+\b"
+    )
+    next_match = boundary_re.search(full_text, start + len(matches[0].group()))
     end = next_match.start() if next_match else len(full_text)
     return full_text[start:end]
 
