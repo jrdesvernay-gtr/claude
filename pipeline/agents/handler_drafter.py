@@ -8,6 +8,7 @@ result on probation (see handler_registry.register_agent_drafted).
 """
 from __future__ import annotations
 
+import builtins as _builtins
 import re
 import textwrap
 import uuid
@@ -54,6 +55,25 @@ def _extract_code(raw: str) -> str:
     return fence.group(1).strip() if fence else text
 
 
+# Confirmed live: the original whitelist (len/range/str/int only) was too
+# narrow for realistic parsing code -- Taco Bell's drafted handler, once
+# it had enough token budget to actually reason through the format, used
+# isinstance() for a defensive type check and hit NameError, since it
+# wasn't in scope. This is a generous but still safe set: ordinary data-
+# munging builtins, no file/process/import/eval access (those stay
+# excluded, blocked both by _FORBIDDEN's source-text check and by simply
+# not appearing here).
+_SAFE_BUILTINS = {
+    name: getattr(_builtins, name)
+    for name in (
+        "len", "range", "str", "int", "float", "bool", "list", "dict", "tuple", "set",
+        "enumerate", "zip", "map", "filter", "sorted", "reversed", "min", "max", "sum",
+        "abs", "round", "isinstance", "hasattr", "getattr", "any", "all", "repr",
+        "ValueError", "TypeError", "KeyError", "IndexError", "StopIteration", "Exception",
+    )
+}
+
+
 def _restricted_import(name: str, *args, **kwargs):
     # Executing a drafted "import re" statement needs Python's __import__
     # builtin internally, even though "re" itself is allowed -- confirmed
@@ -90,10 +110,7 @@ def draft_handler(state: str, item_20_sample: str, fingerprint: dict) -> tuple[s
         raise ValueError(f"Agent 1 draft did not define a parse() function. Raw response: {raw[:500]!r}")
 
     sandbox_globals = {
-        "__builtins__": {
-            "len": len, "range": range, "str": str, "int": int,
-            "__import__": _restricted_import,
-        },
+        "__builtins__": {**_SAFE_BUILTINS, "__import__": _restricted_import},
         "re": re,
     }
     sandbox_locals: dict = {}

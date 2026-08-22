@@ -90,7 +90,12 @@ Respond with ONLY a JSON object:
 
 
 def locate_franchisee_list_via_agent(locator_context: str) -> dict:
-    raw = complete(SYSTEM_PROMPT, locator_context, max_tokens=1024)
+    # Confirmed live: 1024 wasn't a safe floor either -- McDonald's hit the
+    # same truncated-before-JSON-closed failure Wendy's did earlier at 512.
+    # Raised further, and the raw response is now included in the fail-safe
+    # reasoning below so a repeat doesn't again require a blind guess at
+    # the cause.
+    raw = complete(SYSTEM_PROMPT, locator_context, max_tokens=2048)
     result = _extract_json_object(raw)
     if result is None:
         # fail safe: report not_found rather than guessing
@@ -98,7 +103,7 @@ def locate_franchisee_list_via_agent(locator_context: str) -> dict:
             "location_type": "not_found",
             "exhibit_letter": None,
             "confidence": 0.0,
-            "reasoning": "agent response unparseable",
+            "reasoning": f"agent response unparseable, raw response: {raw[:500]!r}",
         }
     result["confidence"] = max(0.0, min(1.0, float(result.get("confidence", 0.0))))
     return result
@@ -121,14 +126,14 @@ Respond with ONLY a JSON object:
 
 
 def verify_franchisee_list_via_agent(preview_text: str) -> dict:
-    raw = complete(VERIFY_SYSTEM_PROMPT, preview_text, max_tokens=256)
+    raw = complete(VERIFY_SYSTEM_PROMPT, preview_text, max_tokens=512)
     result = _extract_json_object(raw)
     if result is None:
         # fail safe: don't trust an unparseable verification
         return {
             "is_franchisee_list": False,
             "confidence": 0.0,
-            "reasoning": "agent response unparseable",
+            "reasoning": f"agent response unparseable, raw response: {raw[:500]!r}",
         }
     result["confidence"] = max(0.0, min(1.0, float(result.get("confidence", 0.0))))
     return result

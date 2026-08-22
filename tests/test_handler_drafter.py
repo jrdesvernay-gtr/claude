@@ -82,3 +82,25 @@ def test_disallowed_import_in_drafted_code_is_rejected():
     with patch(COMPLETE, return_value="import os\n\ndef parse(item_20_text):\n    return []\n"):
         with pytest.raises(ValueError, match="sandbox check"):
             draft_handler("WI", "x\n", {"delimiter": "fixed_width"})
+
+
+CODE_USING_ISINSTANCE = """
+def parse(item_20_text: str) -> list[dict]:
+    rows = []
+    for line in item_20_text.splitlines():
+        parts = line.split("\\t") if isinstance(line, str) else []
+        if len(parts) >= 1 and parts[0].strip():
+            rows.append({"franchisee_raw": parts[0].strip()})
+    return rows
+"""
+
+
+def test_drafted_code_using_isinstance_executes():
+    # Confirmed live: the original builtins whitelist (len/range/str/int
+    # only) was too narrow for realistic parsing code -- a drafted handler
+    # using isinstance() for a defensive type check hit NameError since it
+    # wasn't in scope.
+    with patch(COMPLETE, return_value=CODE_USING_ISINSTANCE):
+        handler_id, fn = draft_handler("WI", "Alpha\tx\n", {"delimiter": "tab"})
+    rows = fn("Alpha\tx\n")
+    assert rows and rows[0].franchisee_raw == "Alpha"
