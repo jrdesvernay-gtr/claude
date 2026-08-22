@@ -23,8 +23,36 @@ Interpreting the raw evidence is the agent's job.
 from __future__ import annotations
 
 import json
+import re
 
 from pipeline.agents.client import complete
+
+
+def _extract_json_object(raw: str) -> dict | None:
+    """Parse a JSON object out of an agent response, tolerating a wrapping
+    markdown code fence (```json ... ```) or stray text around the object --
+    confirmed live: Wendy's raw locator context is the largest of the three
+    real FDDs tested (21 exhibit letters, many mentions each), and the
+    model's response was cut off before valid JSON closed at the previous,
+    tighter token budget. Widening the budget is the main fix; this parse
+    is just defense in depth against formatting the strict json.loads(raw)
+    doesn't tolerate.
+    """
+    text = raw.strip()
+    fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.DOTALL)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    start, end = text.find("{"), text.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(text[start : end + 1])
+        except json.JSONDecodeError:
+            return None
+    return None
 
 SYSTEM_PROMPT = """You are given every raw "Item 20" and "Exhibit X" mention
 found anywhere in a Franchise Disclosure Document (FDD), each as a short
@@ -62,10 +90,9 @@ Respond with ONLY a JSON object:
 
 
 def locate_franchisee_list_via_agent(locator_context: str) -> dict:
-    raw = complete(SYSTEM_PROMPT, locator_context, max_tokens=512)
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
+    raw = complete(SYSTEM_PROMPT, locator_context, max_tokens=1024)
+    result = _extract_json_object(raw)
+    if result is None:
         # fail safe: report not_found rather than guessing
         return {
             "location_type": "not_found",
@@ -95,9 +122,8 @@ Respond with ONLY a JSON object:
 
 def verify_franchisee_list_via_agent(preview_text: str) -> dict:
     raw = complete(VERIFY_SYSTEM_PROMPT, preview_text, max_tokens=256)
-    try:
-        result = json.loads(raw)
-    except json.JSONDecodeError:
+    result = _extract_json_object(raw)
+    if result is None:
         # fail safe: don't trust an unparseable verification
         return {
             "is_franchisee_list": False,
