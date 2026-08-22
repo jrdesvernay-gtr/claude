@@ -50,6 +50,75 @@ def locate_item_20_section(full_text: str) -> str | None:
     return full_text[start:end]
 
 
+# Item 20's own body is usually narrative + aggregate tables (Table No. 1
+# Systemwide Outlet Summary etc.), NOT the row-level franchisee list --
+# confirmed live: Wendy's/McDonald's/Taco Bell all defer the actual list to
+# a separately-lettered Exhibit, referenced by the FDD's standardized
+# front-matter cross-reference sentence (FTC-mandated summary page), e.g.
+# "Item 20 or Exhibits P and R list current and former franchisees." /
+# "Exhibit F lists current and former licensees." The letter(s) differ
+# every franchisor -- that sentence is how we find the right one.
+EXHIBIT_REFERENCE_SENTENCE_RE = re.compile(
+    # Real FDDs render this as a two-column table (question | answer), and
+    # pdfplumber's line-based extraction interleaves the columns -- confirmed
+    # live: "...Exhibits P and R list current and former\nfranchisee?
+    # franchisees." has a stray question-column fragment ("franchisee? ")
+    # wedged between "former" and "franchisees". Allow a short gap there
+    # rather than requiring the phrase to be contiguous.
+    r"[^.]*Exhibits?\s+[A-Z][^.]*current and former[^.]{0,60}?(?:franchisees|licensees)[^.]*\.",
+    re.IGNORECASE,
+)
+
+
+def find_referenced_exhibit_letters(full_text: str) -> list[str]:
+    """Extract the exhibit letter(s) named by the front-matter cross-
+    reference sentence, e.g. "...Exhibits P and R..." -> ['P', 'R'].
+    Returns [] if that sentence isn't found (some FDDs may put the list
+    directly under Item 20 instead of deferring to an exhibit).
+    """
+    m = EXHIBIT_REFERENCE_SENTENCE_RE.search(full_text)
+    if not m:
+        return []
+    return re.findall(r"\b[A-Z]\b", m.group())
+
+
+def locate_exhibit_section(full_text: str, letter: str) -> str | None:
+    """Locate EXHIBIT {letter}'s section by its ALL-CAPS heading. Like Item
+    headings, an exhibit letter can appear earlier in a table of contents /
+    list of exhibits before the real heading, so take the LAST match. Runs
+    until the next "EXHIBIT {other letter}" or "ITEM {n}" heading, or EOF.
+    """
+    heading_re = re.compile(rf"\bEXHIBIT\s+{re.escape(letter)}\b")
+    matches = list(heading_re.finditer(full_text))
+    if not matches:
+        return None
+    start = matches[-1].start()
+    boundary_re = re.compile(r"\bEXHIBIT\s+[A-Z]\b|\bITEM\s*\d+\b")
+    next_match = boundary_re.search(full_text, start + len(matches[-1].group()))
+    end = next_match.start() if next_match else len(full_text)
+    return full_text[start:end]
+
+
+def locate_franchisee_list_section(full_text: str) -> tuple[str, str] | None:
+    """The real Step 3.3 entry point: find wherever the actual per-unit
+    franchisee list lives, which is usually a lettered Exhibit rather than
+    Item 20's own body. Returns (section_text, source_label) --
+    source_label is e.g. "exhibit_O" or "item_20_body", useful for
+    fdd_filings provenance/debugging. None if nothing could be located
+    deterministically (candidate for Agent 1 escalation).
+    """
+    for letter in find_referenced_exhibit_letters(full_text):
+        section = locate_exhibit_section(full_text, letter)
+        if section:
+            return section, f"exhibit_{letter}"
+
+    item_20 = locate_item_20_section(full_text)
+    if item_20:
+        return item_20, "item_20_body"
+
+    return None
+
+
 def structural_fingerprint(item_20_text: str) -> dict:
     """Cheap structural probes used to route to a handler: delimiter guess,
     column count on the densest line, whether rows look pipe/tab/comma

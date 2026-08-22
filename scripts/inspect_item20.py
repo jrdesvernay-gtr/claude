@@ -19,8 +19,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.parsing.format_detection import (  # noqa: E402
+    find_referenced_exhibit_letters,
     is_text_native,
-    locate_item_20_section,
+    locate_franchisee_list_section,
     structural_fingerprint,
 )
 
@@ -61,23 +62,30 @@ def inspect(pdf_path: Path) -> None:
 
     show_all_item20_occurrences(full_text)
 
-    item_20_text = locate_item_20_section(full_text)
-    if item_20_text is None:
-        print("  Item 20 section NOT FOUND by the current regex (item\\s*20 ... item\\s*21).")
+    letters = find_referenced_exhibit_letters(full_text)
+    print(f"  Referenced exhibit letter(s): {letters or '(none found)'}")
+
+    result = locate_franchisee_list_section(full_text)
+    if result is None:
+        print("  Franchisee list section NOT FOUND (neither a referenced exhibit nor Item 20's own body).")
         out_path = pdf_path.with_suffix(".fulltext.txt")
         out_path.write_text(full_text)
         print(f"  Saved full extracted text to {out_path} for manual inspection.")
         return
 
-    lines = item_20_text.splitlines()
-    print(f"  Item 20 section: {len(lines)} lines, {len(item_20_text)} chars")
+    section_text, source_label = result
+    lines = section_text.splitlines()
+    print(f"  Located via: {source_label}")
+    print(f"  Section: {len(lines)} lines, {len(section_text)} chars")
 
-    fp = structural_fingerprint(item_20_text)
+    fp = structural_fingerprint(section_text)
     print(f"  Structural fingerprint: {fp}")
 
-    out_path = pdf_path.with_suffix(".item20.txt")
-    out_path.write_text(item_20_text)
-    print(f"  Saved full Item 20 text to {out_path}")
+    out_path = pdf_path.with_suffix(f".{source_label}.txt")
+    out_path.write_text(section_text)
+    print(f"  Saved full section text to {out_path}")
+
+    item_20_text = section_text
 
     print(f"\n  --- First {PREVIEW_LINES} lines ---")
     for line in lines[:PREVIEW_LINES]:
