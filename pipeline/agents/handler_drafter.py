@@ -49,28 +49,43 @@ a person's own two-word name across `franchisee_raw`/`address` (e.g.
 address="DAVIDSON 800 W NORTHERN LIGHTS BLVD" -- wrong; the name is "MICHAEL
 DAVIDSON", the address starts at "800").
 
-Use these anchors instead of guessing from position:
+Use these anchors instead of guessing from position -- confirmed live, a
+FIRST attempt at this guidance fixed the two examples above but broke a
+different real case, Taco Bell's "408 State Highway 149 North Travel
+Centers of America (PH K04060) Earle AR-Arkansas 72331" -> cutting right
+after "Highway" gave address="408 State Highway", city="149 North Travel
+Centers of America (PH K04060) Earle" -- wrong; a route/highway NUMBER
+following the suffix word is still part of the street address, and a
+site/location name between the street address and the real city (here,
+"Travel Centers of America (PH K04060)") is not the city either. The
+correct split is address="408 State Highway 149 North", city="Earle" (with
+"Travel Centers of America (PH K04060)" having nowhere to go in this
+schema -- fold it into `address` rather than misassign it as `city`).
+
+- The state is the most reliable anchor: a 2-letter code, a full state
+  name, or a combined "XX-Statename" token. Locate it first, then work
+  BACKWARD from it -- don't split left-to-right by counting words or by
+  the first delimiter you find.
+- City is the LAST word or short phrase immediately before the state token
+  -- a real municipality name, not a business/site name or a parenthetical.
+  If there's ambiguous descriptive text between the street portion and the
+  city (a site name, a mall/plaza name, a "(PH ######)" style code), that
+  text isn't the city -- fold it into `address` instead, since there's no
+  separate field for it in this schema. Default to putting uncertain
+  middle text in `address`, never in `city`.
 - The franchisee/entity field ends and the address begins at the first
   token that is a plain number (a house number) OR a token containing both
-  letters and digits in an address-like pattern (e.g. "PH K04060", a route
-  or highway number). A person's or company's name never starts with a bare
-  number, so don't cut into it looking for one too early -- scan from the
-  START of the line for the first such number-led token, not from a fixed
-  word count.
-- The address ends and the city begins right AFTER the last street-type
-  suffix word: ST, STREET, AVE, AVENUE, BLVD, BOULEVARD, RD, ROAD, DR,
-  DRIVE, HWY, HIGHWAY, PKWY, PARKWAY, LN, LANE, CT, COURT, WAY, CIR, CIRCLE,
-  PL, PLACE, TRL, TRAIL, PIKE, PLAZA, LOOP, ROUTE, RTE, HWY (case-
-  insensitive) -- OR after a trailing suite/unit marker like "STE 100",
-  "SUITE B", "#7", "UNIT 2" if one is present after the street name. If a
-  route/highway number appears WITHOUT a suffix word (e.g. "US-231"), the
-  address ends at that token instead. Everything between that point and the
-  state/zip/phone is the city (may be multiple words, e.g. "West Palm
-  Beach").
-- The state is usually the most reliable anchor: a 2-letter code, a full
-  state name, or a combined "XX-Statename" token. Locate it first if
-  present, then work backward from it for city, then from the city boundary
-  backward for address -- don't just split left-to-right by counting words.
+  letters and digits in an address-like pattern. A person's or company's
+  name never starts with a bare number, so don't cut into it looking for
+  one too early -- scan from the START of the line for the first such
+  number-led token, not from a fixed word count.
+- A street-type suffix word (ST, AVE, BLVD, RD, DR, HWY, HIGHWAY, PKWY, LN,
+  CT, WAY, CIR, PL, TRL, PIKE, ROUTE, RTE, etc.) does NOT necessarily end
+  the address -- if a number and/or a directional (N, S, E, W, NE, NW, SE,
+  SW) immediately follows it (e.g. "Highway 149 North", "Route 66 West"),
+  that's still part of the street address, not the city. A trailing
+  suite/unit marker ("STE 100", "SUITE B", "#7", "UNIT 2") is also still
+  part of the address if present.
 
 Return ONLY the function source code, no prose, no markdown fences.
 """
