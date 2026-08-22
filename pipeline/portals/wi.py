@@ -62,7 +62,12 @@ class WiPortalClient:
                     page = browser.new_page()
                     page.set_default_timeout(30_000)
                     page.goto(BASE_URL)
-                    page.get_by_label("Name (Legal or Trade):").fill(franchisor_name)
+                    # The "Name (Legal or Trade):" text isn't wrapped in a real
+                    # <label> on this page (confirmed live -- get_by_label fails
+                    # even though a human sees the label fine), so target the
+                    # page's one text input by ARIA role instead, which doesn't
+                    # require a label association to match.
+                    page.get_by_role("textbox").first.fill(franchisor_name)
                     page.get_by_role("button", name="Search").click()
                     # ASP.NET postback -- wait for the results text to actually update
                     # rather than "networkidle", which can hang on pages with
