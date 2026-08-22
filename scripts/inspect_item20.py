@@ -51,6 +51,28 @@ def show_all_item20_occurrences(full_text: str) -> None:
         print(f"    @{m.start()}: ...{snippet}...")
 
 
+def show_list_of_exhibits(full_text: str) -> None:
+    import re
+
+    print("  --- List of Exhibits ---")
+    m = re.search(r"LIST\s+OF\s+EXHIBITS", full_text)
+    if m:
+        chunk = full_text[m.start(): m.start() + 4000]
+        for line in chunk.splitlines():
+            if line.strip():
+                print(f"    {line!r}")
+        return
+
+    print("  ('LIST OF EXHIBITS' heading not found -- falling back to scanning all EXHIBIT lines)")
+    seen = set()
+    for line in full_text.splitlines():
+        stripped = line.strip()
+        em = re.match(r"^EXHIBIT\s+([A-Z])\b", stripped)
+        if em and em.group(1) not in seen:
+            seen.add(em.group(1))
+            print(f"    {line!r}")
+
+
 def inspect(pdf_path: Path) -> None:
     print(f"\n{'=' * 70}\n{pdf_path.name}\n{'=' * 70}")
 
@@ -62,6 +84,7 @@ def inspect(pdf_path: Path) -> None:
         return
 
     show_all_item20_occurrences(full_text)
+    show_list_of_exhibits(full_text)
 
     letters = find_referenced_exhibit_letters(full_text)
     print(f"  Referenced exhibit letter(s): {letters or '(none found)'}")
