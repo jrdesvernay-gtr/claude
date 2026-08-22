@@ -1,7 +1,24 @@
 """MN Commerce Franchise Registration Search --
 https://cards.web.commerce.state.mn.us/franchise-registrations
 
-Live-verified flow (2026-08-22, against "Quality Is Our Recipe, LLC" / Wendy's).
+*** OUT OF V1 AUTOMATED SCOPE (2026-08-22) ***
+Live-tested: this portal returns 403 Forbidden to headless Playwright --
+page never loads, zero form elements present -- while loading fine in a
+normal browser at the same moment. That's automation-fingerprint blocking,
+not a general outage or a selector bug (two earlier "fix" attempts targeting
+this file were chasing a phantom -- the form was never there to select
+against). Per the project's non-negotiable constraint against bypassing
+CAPTCHAs/bot-detection, no stealth plugin, header spoofing, or
+navigator.webdriver override was attempted or should be added here. See
+data/reference/fdd-registration-portals.csv and pipeline/config.py's
+V1_STATE_SEARCH_ORDER (WI-only) for the current scope. This module is kept
+for documentation/future-reference (e.g. if MN ever offers a non-blocked
+access path) but MnPortalClient should not be wired into the live pipeline
+until that changes.
+
+Live-verified flow (2026-08-22, against "Quality Is Our Recipe, LLC" / Wendy's,
+before the 403 was discovered -- i.e. this describes the intended flow, not
+a currently-working one).
 
 Document type: search "Clean FDD" first, "Final FDD" second (only fall back
 if Clean FDD returns nothing) -- NOT "Marked FDD", which is a redline/diff

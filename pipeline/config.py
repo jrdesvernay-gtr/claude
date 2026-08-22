@@ -13,8 +13,15 @@ REFERENCE_DIR = REPO_ROOT / "data" / "reference"
 PORTALS_CSV = REFERENCE_DIR / "fdd-registration-portals.csv"
 SEED_LIST_CSV = REFERENCE_DIR / "franchisor-seed-list.csv"
 
-# v1 automation scope, in search order (Step 2: WI first, then MN, stop at first hit).
-V1_STATE_SEARCH_ORDER = ["WI", "MN"]
+# v1 automation scope, in search order (Step 2: stop at first hit).
+# MN was pulled 2026-08-22: live-tested 403 Forbidden to headless Playwright
+# while loading fine in a normal browser at the same time -- automation-
+# fingerprint blocking. Per the non-negotiable constraint against bypassing
+# bot-detection, no stealth/spoofing workaround was attempted; see
+# data/reference/fdd-registration-portals.csv for detail. v1_scoped_portals()
+# below also filters on the CSV's v1_scope column, so this list is
+# belt-and-suspenders with that file -- keep them in sync.
+V1_STATE_SEARCH_ORDER = ["WI"]
 
 # Entity resolution (Step 3.7): fuzzy match on legal_name.
 FUZZY_MATCH_AUTO_ACCEPT = 92   # rapidfuzz score >= this: auto-merge, no agent call

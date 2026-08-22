@@ -17,7 +17,8 @@ data/reference/              Static reference CSVs (portal audit, seed list)
 pipeline/
   config.py                  v1 state scope + confidence thresholds
   models.py                  in-memory row shapes mirroring the schema
-  portals/                   WI + MN search/download clients (v1 scope)
+  portals/                   WI search/download client (v1 scope). mn.py is
+                              written but NOT wired in -- see below
   parsing/                   format detection, handler registry + handlers,
                               OCR gate, Table 1 cross-check, franchisee-field
                               split (legal name vs. guarantor names)
@@ -40,34 +41,49 @@ bottom in `pipeline/orchestrator.py`.
 
 ## v1 scope
 
-Automation covers **WI and MN only** — both confirmed clean (no CAPTCHA) as
-of 2026-08-21. VA and CA returned 503/maintenance on last check; they use
-the same retry-with-backoff helper (`pipeline/portals/base.py`) but are not
-yet promoted into `V1_STATE_SEARCH_ORDER` (`pipeline/config.py`) — do that
-once several consecutive clean retries confirm they're scriptable. All
-CAPTCHA-gated and FRED-dependent states, plus contact-only states (MI, WA,
-HI), are permanently out of scope per the non-negotiable constraint against
-bypassing CAPTCHA/bot-detection.
+Automation covers **WI only**, live-verified end-to-end (search + download)
+against real franchisors on 2026-08-22. **MN was pulled from v1 scope the
+same day**: it returns 403 Forbidden to headless Playwright while loading
+fine in a normal browser at the same time — automation-fingerprint
+blocking, confirmed live, not a selector bug or a general outage. Per the
+non-negotiable constraint against bypassing CAPTCHAs/bot-detection, no
+workaround (stealth plugin, header spoofing, `navigator.webdriver`
+override) was attempted or should be added — `pipeline/portals/mn.py` is
+kept for reference but isn't wired into `V1_STATE_SEARCH_ORDER`. See
+`data/reference/fdd-registration-portals.csv` for detail.
+
+VA and CA returned 503/maintenance on last check; they use the same
+retry-with-backoff helper (`pipeline/portals/base.py`) but are not yet
+promoted into `V1_STATE_SEARCH_ORDER` — do that once several consecutive
+clean retries confirm they're scriptable (and confirm they don't also
+403 a headless browser the way MN does). All CAPTCHA-gated and
+FRED-dependent states, plus contact-only states (MI, WA, HI), are
+permanently out of scope per the same constraint.
 
 ## Portal scraping: Playwright, not raw HTTP
 
-`pipeline/portals/wi.py` and `mn.py` drive a real headless browser
-(Playwright) rather than hand-rolled `requests` calls, live-verified
-2026-08-22 against real WI/MN searches for Wendy's:
+`pipeline/portals/wi.py` (live and working) and `mn.py` (written, but
+blocked — see v1 scope above) drive a real headless browser (Playwright)
+rather than hand-rolled `requests` calls:
 
 - **WI** runs on classic ASP.NET WebForms — search and the FDD download are
   both synchronous postbacks (the download button hijacks the HTTP response
   with the PDF instead of re-rendering the page). Playwright handles the
   viewstate/postback machinery automatically instead of us harvesting hidden
-  fields by hand.
-- **MN** is a plain query-string search, but the document type matters:
-  search `Clean FDD` first, falling back to `Final FDD` only if that returns
-  nothing — never `Marked FDD` (that's a redline/diff document, not the
-  clean filed FDD Item 20 needs to be parsed from).
-- Both clients select elements by **visible label/role text**
-  (`get_by_label(...)`, `get_by_role("button", name=...)`) rather than exact
-  field names or CSS paths, specifically to survive markup churn without
-  needing a manual re-scrape every time a state tweaks their site.
+  fields by hand. Live-verified 2026-08-22: search + download both succeed
+  for Wendy's, McDonald's, and Taco Bell.
+- Selectors ended up **positional/role-based** (`get_by_role("textbox")`,
+  indexed where a page has several), not label-based as originally written
+  — WI's and MN's form fields turned out not to be wrapped in real
+  `<label>` elements despite looking labeled to a human, so
+  `get_by_label(...)` reliably timed out live. Substring-matching header
+  lookups (e.g. `"effective date" in header_text`) were also needed since
+  live sortable-column headers include a sort-order glyph that breaks an
+  exact-match lookup.
+- MN's intended flow (written but unreachable): plain query-string search,
+  document type `Clean FDD` first, `Final FDD` fallback — never `Marked
+  FDD` (a redline/diff document, not the clean filed FDD Item 20 needs to
+  be parsed from).
 
 Requires a one-time browser install: `python3 -m playwright install
 chromium`. Test against real franchisors with:
