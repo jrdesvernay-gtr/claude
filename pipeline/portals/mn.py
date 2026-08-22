@@ -73,11 +73,15 @@ class MnPortalClient:
         return _with_retries(run)
 
     def _search_one_document_type(self, page, franchisor_name: str, doc_type: str) -> list[SearchHit]:
-        page.goto(BASE_URL, wait_until="networkidle")
+        page.set_default_timeout(30_000)
+        page.goto(BASE_URL)
         page.get_by_label("Franchisor:").fill(franchisor_name)
         page.get_by_label("Document type:").select_option(label=doc_type)
         page.get_by_role("button", name="Search").click()
-        page.wait_for_load_state("networkidle")
+        # Wait for the results view's "Export (CSV)" button rather than
+        # "networkidle", which can hang on pages with persistent background
+        # connections (analytics, etc.).
+        page.get_by_role("button", name="Export").wait_for()
 
         table = page.locator("table").first
         header_cells = table.locator("tr").first.locator("th, td").all_inner_texts()

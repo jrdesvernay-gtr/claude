@@ -60,10 +60,14 @@ class WiPortalClient:
                 browser = p.chromium.launch()
                 try:
                     page = browser.new_page()
-                    page.goto(BASE_URL, wait_until="networkidle")
+                    page.set_default_timeout(30_000)
+                    page.goto(BASE_URL)
                     page.get_by_label("Name (Legal or Trade):").fill(franchisor_name)
                     page.get_by_role("button", name="Search").click()
-                    page.wait_for_load_state("networkidle")
+                    # ASP.NET postback -- wait for the results text to actually update
+                    # rather than "networkidle", which can hang on pages with
+                    # persistent background connections (analytics, etc.)
+                    page.get_by_text("Results Count:").wait_for()
 
                     header_cells = page.locator("table tr").first.locator("th, td").all_inner_texts()
                     col_index = {h.strip().lower(): i for i, h in enumerate(header_cells)}
@@ -106,7 +110,9 @@ class WiPortalClient:
                 browser = p.chromium.launch()
                 try:
                     page = browser.new_page()
-                    page.goto(hit.filing_url, wait_until="networkidle")
+                    page.set_default_timeout(30_000)
+                    page.goto(hit.filing_url)
+                    page.get_by_role("button", name="Download").wait_for()
                     with page.expect_download() as download_info:
                         page.get_by_role("button", name="Download").click()
                     download = download_info.value
