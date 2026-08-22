@@ -75,7 +75,13 @@ def draft_handler(state: str, item_20_sample: str, fingerprint: dict) -> tuple[s
         f"Structural fingerprint: {fingerprint}\n\n"
         f"Sample Item 20 text (may be truncated):\n{item_20_sample[:6000]}"
     )
-    raw = complete(SYSTEM_PROMPT, user_prompt)
+    # Confirmed live: Taco Bell's messier, irregular fixed-width format
+    # (combined state field, optional phone, multi-word entity names) made
+    # the model spend its entire budget on internal reasoning ("thinking"
+    # block) and hit max_tokens before emitting any actual code -- the
+    # default budget is fine for simple formats but not a safe floor once
+    # the reasoning itself gets long.
+    raw = complete(SYSTEM_PROMPT, user_prompt, max_tokens=8192)
     code = _extract_code(raw)
 
     if _FORBIDDEN.search(code):
