@@ -36,6 +36,8 @@ create table if not exists fdd_filings (
     downloaded_at         timestamptz not null default now(),
     handler_id_used        text,                        -- registry key, see parsing.handlers
     handler_confidence     numeric(3,2),                -- 0.00-1.00, probationary handlers start low
+    section_source          text,                         -- e.g. 'exhibit_O' or 'item_20_body' -- where the Agent 1 section locator found the franchisee list
+    section_locator_confidence numeric(3,2),               -- Agent 1 section locator's confidence, 0.00-1.00
     table1_outlet_count    int,                          -- Item 20 Table No. 1 self-disclosed total
     parsed_row_count       int,                          -- rows actually parsed from the exhibit
     table1_match           boolean,                      -- table1_outlet_count = parsed_row_count

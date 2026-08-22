@@ -24,7 +24,7 @@ from pipeline.parsing.format_detection import (  # noqa: E402
     is_text_native,
     list_exhibit_titles,
     locate_exhibit_section,
-    locate_franchisee_list_section,
+    locate_franchisee_list_section_heuristic,
     structural_fingerprint,
 )
 
@@ -98,13 +98,13 @@ def inspect(pdf_path: Path) -> None:
     print(f"  Front-matter-referenced exhibit letter(s): {letters or '(none found)'}")
 
     # Show every candidate exhibit (title match plus every referenced
-    # letter), not just whichever locate_franchisee_list_section() would
+    # letter), not just whichever locate_franchisee_list_section_heuristic() would
     # pick -- useful for comparing them side by side while validating.
     candidate_letters = ([roster_letter] if roster_letter else []) + [
         l for l in letters if l != roster_letter
     ]
     if not candidate_letters:
-        result = locate_franchisee_list_section(full_text)
+        result = locate_franchisee_list_section_heuristic(full_text)
         if result is None:
             print("  Franchisee list section NOT FOUND (no title match, no referenced exhibit, no Item 20 body).")
             out_path = pdf_path.with_suffix(".fulltext.txt")
@@ -114,7 +114,7 @@ def inspect(pdf_path: Path) -> None:
         show_section(pdf_path, *result)
         return
 
-    print(f"\n  >>> locate_franchisee_list_section() would pick: exhibit_{candidate_letters[0]} <<<")
+    print(f"\n  >>> locate_franchisee_list_section_heuristic() would pick: exhibit_{candidate_letters[0]} <<<")
     for letter in candidate_letters:
         section = locate_exhibit_section(full_text, letter)
         if section is None:

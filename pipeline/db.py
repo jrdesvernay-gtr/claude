@@ -41,6 +41,8 @@ def insert_fdd_filing(client, filing: FddFiling, franchisor_id: str) -> str:
         "document_type": filing.document_type,
         "handler_id_used": filing.handler_id_used,
         "handler_confidence": filing.handler_confidence,
+        "section_source": filing.section_source,
+        "section_locator_confidence": filing.section_locator_confidence,
         "table1_outlet_count": filing.table1_outlet_count,
         "parsed_row_count": filing.parsed_row_count,
         "table1_match": filing.table1_match,

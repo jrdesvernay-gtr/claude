@@ -1,6 +1,12 @@
-"""Step 3.2/3.3: detect text-native vs. scanned documents, then classify the
-Item 20 exhibit's table format against the handler registry via structural
-probes (column layout, delimiter pattern).
+"""Step 3.2: detect text-native vs. scanned documents. Also the mechanical
+text-extraction primitives (Item 20 body, exhibit titles, exhibit sections)
+that pipeline.orchestrator.locate_franchisee_list_section() feeds to Agent
+1 for Step 3.3's real judgment call -- see pipeline/agents/section_locator.py
+for why that's agent-primary rather than more regex: FDD structure (which
+exhibit letter holds the roster, if any; what it's titled) varies too much
+across ~40,000 US franchisors to chase with keyword matching.
+structural_fingerprint() still feeds Step 3.4's handler-registry routing
+via structural probes (column layout, delimiter pattern).
 """
 from __future__ import annotations
 
@@ -170,13 +176,17 @@ def find_roster_exhibit_letter(full_text: str) -> str | None:
     return None
 
 
-def locate_franchisee_list_section(full_text: str) -> tuple[str, str] | None:
-    """The real Step 3.3 entry point: find wherever the actual per-unit
-    franchisee list lives, which is usually a lettered Exhibit rather than
-    Item 20's own body. Returns (section_text, source_label) --
-    source_label is e.g. "exhibit_O" or "item_20_body", useful for
-    fdd_filings provenance/debugging. None if nothing could be located
-    deterministically (candidate for Agent 1 escalation).
+def locate_franchisee_list_section_heuristic(full_text: str) -> tuple[str, str] | None:
+    """NOT the pipeline's real entry point -- that's
+    pipeline.orchestrator.locate_franchisee_list_section(), which is
+    agent-primary (see pipeline/agents/section_locator.py). FDD structure
+    varies too much across ~40,000 US franchisors for keyword regex to
+    keep up on its own; this heuristic version is kept only as a zero-cost
+    offline utility (e.g. sanity-checking the agent's answer, or a fallback
+    if the agent API is unavailable), not as the thing that decides.
+
+    Returns (section_text, source_label) -- source_label is e.g.
+    "exhibit_O" or "item_20_body". None if nothing matched.
 
     Priority: an exhibit whose own title identifies it as the roster, then
     an exhibit named by the front-matter cross-reference sentence (a

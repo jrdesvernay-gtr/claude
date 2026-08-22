@@ -14,6 +14,8 @@ from pipeline.config import v1_scoped_portals
 from pipeline.parsing import handlers  # noqa: F401 - registers built-in handlers
 from pipeline.parsing.format_detection import (
     is_text_native,
+    list_exhibit_titles,
+    locate_exhibit_section,
     locate_item_20_section,
     structural_fingerprint,
 )
@@ -49,15 +51,49 @@ def extract_text(pdf_path: str, extracted_text_layer: str) -> str:
     return ocr_pdf_to_text(pdf_path)
 
 
-def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
-    """Step 3.3-3.6: locate Item 20, classify format, parse, cross-check
-    against Table 1. Returns the filing metadata (with review_flag set) and
-    the parsed rows. Caller should NOT load rows into `units` if
-    filing.review_flag is True.
+def locate_franchisee_list_section(full_text: str) -> tuple[str, str, float | None]:
+    """Step 3.3: find wherever the actual per-unit franchisee list lives.
+    FDD structure varies too much across the ~40,000 US franchisors for
+    regex to keep up (different exhibit letters, different vocabulary, the
+    list sometimes inside Item 20's own body and sometimes deferred to an
+    exhibit) -- this is agent-primary, not agent-as-fallback. Deterministic
+    code only does the cheap, mechanical extraction fed to the agent
+    (exhibit titles, Item 20's own body); the agent makes the judgment call
+    of which one is the actual current-franchisee roster.
+
+    Returns (section_text, section_source, confidence). Raises if nothing
+    usable was found.
     """
-    item_20_text = locate_item_20_section(full_text)
-    if item_20_text is None:
-        raise ValueError("Item 20 section not found in document")
+    from pipeline.agents.section_locator import locate_franchisee_list_via_agent
+
+    exhibit_titles = list_exhibit_titles(full_text)
+    item_20_body = locate_item_20_section(full_text) or ""
+
+    decision = locate_franchisee_list_via_agent(exhibit_titles, item_20_body)
+    confidence = decision.get("confidence")
+
+    if decision.get("location_type") == "exhibit" and decision.get("exhibit_letter"):
+        letter = decision["exhibit_letter"]
+        section = locate_exhibit_section(full_text, letter)
+        if section:
+            return section, f"exhibit_{letter}", confidence
+
+    if decision.get("location_type") == "item_20_body" and item_20_body:
+        return item_20_body, "item_20_body", confidence
+
+    raise ValueError(
+        f"Section locator agent could not find the franchisee list "
+        f"(decision={decision})"
+    )
+
+
+def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
+    """Step 3.3-3.6: locate the franchisee list section, classify format,
+    parse, cross-check against Table 1. Returns the filing metadata (with
+    review_flag set) and the parsed rows. Caller should NOT load rows into
+    `units` if filing.review_flag is True.
+    """
+    item_20_text, section_source, section_locator_confidence = locate_franchisee_list_section(full_text)
 
     fingerprint = structural_fingerprint(item_20_text)
     handler = registry.find_match(state, fingerprint)
@@ -79,6 +115,8 @@ def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
         source_url="",
         handler_id_used=handler.id,
         handler_confidence=handler.confidence_score,
+        section_source=section_source,
+        section_locator_confidence=section_locator_confidence,
     )
     filing = apply_crosscheck(filing, rows, item_20_text)
 

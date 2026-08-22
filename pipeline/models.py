@@ -30,6 +30,8 @@ class FddFiling:
     filing_year: int | None = None
     handler_id_used: str | None = None
     handler_confidence: float | None = None
+    section_source: str | None = None          # e.g. "exhibit_O" or "item_20_body"
+    section_locator_confidence: float | None = None  # Agent locator's confidence, 0-1
     table1_outlet_count: int | None = None
     parsed_row_count: int | None = None
     table1_match: bool | None = None

@@ -2,7 +2,7 @@ from pipeline.parsing.format_detection import (
     find_referenced_exhibit_letters,
     find_roster_exhibit_letter,
     list_exhibit_titles,
-    locate_franchisee_list_section,
+    locate_franchisee_list_section_heuristic,
     locate_item_20_section,
 )
 
@@ -84,7 +84,7 @@ Some Former Franchisee LLC\t789 Oak St\tKenosha\tWI\t53140\t262-555-0177\tTermin
 
 
 def test_prefers_referenced_exhibit_over_item_20_body():
-    result = locate_franchisee_list_section(SAMPLE_FDD_WITH_EXHIBIT)
+    result = locate_franchisee_list_section_heuristic(SAMPLE_FDD_WITH_EXHIBIT)
     assert result is not None
     section, source = result
     assert source == "exhibit_P"
@@ -97,7 +97,7 @@ def test_prefers_referenced_exhibit_over_item_20_body():
 def test_falls_back_to_item_20_body_when_referenced_exhibit_not_found():
     # SAMPLE_FDD references "Exhibits P and R" but neither heading exists
     # in the document -- falls back to Item 20's own body.
-    result = locate_franchisee_list_section(SAMPLE_FDD)
+    result = locate_franchisee_list_section_heuristic(SAMPLE_FDD)
     assert result is not None
     section, source = result
     assert source == "item_20_body"
@@ -150,7 +150,7 @@ Some Closed LLC\t111 Pine St\tRacine\tWI\t53401\t414-555-0199\tClosed
 
 
 def test_prefers_title_matched_roster_exhibit_over_front_matter_reference():
-    result = locate_franchisee_list_section(SAMPLE_FDD_WENDYS_LIKE)
+    result = locate_franchisee_list_section_heuristic(SAMPLE_FDD_WENDYS_LIKE)
     assert result is not None
     section, source = result
     assert source == "exhibit_O"
@@ -162,7 +162,7 @@ def test_prefers_title_matched_roster_exhibit_over_front_matter_reference():
 
 def test_falls_back_to_referenced_exhibit_when_no_title_matches():
     text = SAMPLE_FDD_WENDYS_LIKE.replace("OPERATING OUTLETS BY STATE", "MISC DISCLOSURE")
-    result = locate_franchisee_list_section(text)
+    result = locate_franchisee_list_section_heuristic(text)
     assert result is not None
     section, source = result
     assert source == "exhibit_P"
@@ -233,7 +233,7 @@ def test_handles_double_letter_exhibit_codes():
     assert find_referenced_exhibit_letters(SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT) == ["AA", "BB"]
     assert find_roster_exhibit_letter(SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT) == "AA"
 
-    result = locate_franchisee_list_section(SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT)
+    result = locate_franchisee_list_section_heuristic(SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT)
     assert result is not None
     section, source = result
     assert source == "exhibit_AA"
