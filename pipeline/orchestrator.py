@@ -61,30 +61,50 @@ def locate_franchisee_list_section(full_text: str) -> tuple[str, str, float | No
     (exhibit titles, Item 20's own body); the agent makes the judgment call
     of which one is the actual current-franchisee roster.
 
+    Two agent calls, not one: the first picks a candidate location from
+    exhibit titles / Item 20's body alone, which can be wrong (an exhibit
+    titled like a roster that's actually something else). The second reads
+    the first 20 lines of whatever the first call picked and confirms it's
+    really a current-franchisee list before we commit to it -- confirmed
+    live this catches real mistakes cheap deterministic pre-parsing alone
+    can't (e.g. an exhibit title that reads like a roster but isn't one).
+
     Returns (section_text, section_source, confidence). Raises if nothing
-    usable was found.
+    usable was found or verification fails.
     """
-    from pipeline.agents.section_locator import locate_franchisee_list_via_agent
+    from pipeline.agents.section_locator import (
+        locate_franchisee_list_via_agent,
+        verify_franchisee_list_via_agent,
+    )
 
     exhibit_titles = list_exhibit_titles(full_text)
     item_20_body = locate_item_20_section(full_text) or ""
 
     decision = locate_franchisee_list_via_agent(exhibit_titles, item_20_body)
-    confidence = decision.get("confidence")
 
+    section, source = None, None
     if decision.get("location_type") == "exhibit" and decision.get("exhibit_letter"):
         letter = decision["exhibit_letter"]
         section = locate_exhibit_section(full_text, letter)
-        if section:
-            return section, f"exhibit_{letter}", confidence
+        source = f"exhibit_{letter}"
+    elif decision.get("location_type") == "item_20_body" and item_20_body:
+        section, source = item_20_body, "item_20_body"
 
-    if decision.get("location_type") == "item_20_body" and item_20_body:
-        return item_20_body, "item_20_body", confidence
+    if not section:
+        raise ValueError(
+            f"Section locator agent could not find the franchisee list "
+            f"(decision={decision})"
+        )
 
-    raise ValueError(
-        f"Section locator agent could not find the franchisee list "
-        f"(decision={decision})"
-    )
+    preview = "\n".join(section.splitlines()[:20])
+    verification = verify_franchisee_list_via_agent(preview)
+    if not verification.get("is_franchisee_list"):
+        raise ValueError(
+            f"Section locator agent picked {source} but verification rejected it "
+            f"(decision={decision}, verification={verification})"
+        )
+
+    return section, source, verification.get("confidence")
 
 
 def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
