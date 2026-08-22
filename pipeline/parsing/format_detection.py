@@ -29,7 +29,12 @@ def is_text_native(extracted_text: str, min_chars: int = 200) -> bool:
 # the full title case-sensitively is far more specific than a bare "item 20"
 # -- it also appears in the table of contents ahead of the real heading, so
 # take the LAST match, not the first.
-ITEM_20_HEADER_RE = re.compile(r"ITEM\s*20\s+OUTLETS\s+AND\s+FRANCHISEE\s+INFORMATION")
+#
+# A "licensee" system (confirmed live: Taco Bell) uses different vocabulary
+# throughout -- "ITEM 20 UNITS AND LICENSEE INFORMATION" -- so match both.
+ITEM_20_HEADER_RE = re.compile(
+    r"ITEM\s*20\s+(?:OUTLETS|UNITS)\s+AND\s+(?:FRANCHISEE|LICENSEE)\s+INFORMATION"
+)
 ITEM_21_HEADER_RE = re.compile(r"\bITEM\s*21\b")
 TABLE1_HEADER_RE = re.compile(
     r"table\s*(no\.?)?\s*1.{0,80}?systemwide\s+outlet\s+summary", re.IGNORECASE | re.DOTALL
@@ -61,11 +66,13 @@ def locate_item_20_section(full_text: str) -> str | None:
 EXHIBIT_REFERENCE_SENTENCE_RE = re.compile(
     # Real FDDs render this as a two-column table (question | answer), and
     # pdfplumber's line-based extraction interleaves the columns -- confirmed
-    # live: "...Exhibits P and R list current and former\nfranchisee?
-    # franchisees." has a stray question-column fragment ("franchisee? ")
-    # wedged between "former" and "franchisees". Allow a short gap there
-    # rather than requiring the phrase to be contiguous.
-    r"[^.]*Exhibits?\s+[A-Z][^.]*current and former[^.]{0,60}?(?:franchisees|licensees)[^.]*\.",
+    # live in two DIFFERENT places depending on the franchisor: Wendy's/Taco
+    # Bell wrap between "former" and "franchisees" ("...current and former\n
+    # franchisee? franchisees."), McDonald's wraps between "and" and "former"
+    # instead ("...lists current and\nformer franchisees."). Tolerate
+    # whitespace/short gaps in both spots rather than assuming one fixed wrap
+    # point.
+    r"[^.]*Exhibits?\s+[A-Z][^.]*current\s+and\s+former\s*[^.]{0,60}?(?:franchisees|licensees)[^.]*\.",
     re.IGNORECASE,
 )
 
@@ -99,6 +106,64 @@ def locate_exhibit_section(full_text: str, letter: str) -> str | None:
     return full_text[start:end]
 
 
+# The front-matter cross-reference sentence isn't reliable on its own --
+# confirmed live: Wendy's names Exhibits P and R (transfers, closures) and
+# never mentions Exhibit O at all, even though O ("OPERATING OUTLETS BY
+# STATE") is the real current-outlet roster. An exhibit's own TITLE is a
+# stronger, more direct signal of what it actually contains.
+EXHIBIT_HEADING_RE = re.compile(r'^EXHIBIT\s+["“]?([A-Z])["”]?\s*[-–—]?\s*(.*)$')
+ROSTER_TITLE_KEYWORDS_RE = re.compile(
+    r"OPERATING\s+OUTLETS|LIST\s+OF\s+(?:CURRENT\s+)?(?:FRANCHISEES|LICENSEES|OUTLETS)|"
+    r"OUTLETS?\s+(?:BY|LIST)|CURRENT\s+(?:FRANCHISEES|LICENSEES|OUTLETS|UNITS)|"
+    r"INFORMATION\s+REGARDING.*(?:FRANCHISEES|LICENSEES)",
+    re.IGNORECASE,
+)
+
+
+def list_exhibit_titles(full_text: str) -> dict[str, str]:
+    """Best-effort map of exhibit letter -> title, scraped only from the
+    front matter (everything before Item 20's own real body heading).
+    Restricting to the front matter matters: a franchisor's FDD can have an
+    embedded document -- e.g. the franchise agreement itself, attached as
+    an exhibit -- with its own internal "EXHIBIT A/B/C..." heading list
+    deep in the document. Confirmed live: Taco Bell's attached franchise
+    agreement (Exhibit B) has its own nested Exhibits A-I for lease/deed/
+    etc. paperwork, which would otherwise be picked up as if they were the
+    FDD's own top-level exhibit list.
+    """
+    item_20_matches = list(ITEM_20_HEADER_RE.finditer(full_text))
+    boundary = item_20_matches[-1].start() if item_20_matches else len(full_text)
+    window = full_text[:boundary]
+
+    titles: dict[str, str] = {}
+    lines = window.splitlines()
+    for i, line in enumerate(lines):
+        m = EXHIBIT_HEADING_RE.match(line.strip())
+        if not m:
+            continue
+        letter, same_line_title = m.group(1), m.group(2).strip()
+        if same_line_title:
+            titles.setdefault(letter, same_line_title)
+            continue
+        for nxt in lines[i + 1 : i + 3]:
+            nxt = nxt.strip()
+            if nxt and not EXHIBIT_HEADING_RE.match(nxt):
+                titles.setdefault(letter, nxt)
+                break
+    return titles
+
+
+def find_roster_exhibit_letter(full_text: str) -> str | None:
+    """Pick the exhibit whose own title says "this is the current outlet
+    roster" -- see list_exhibit_titles for why this beats the front-matter
+    cross-reference sentence.
+    """
+    for letter, title in list_exhibit_titles(full_text).items():
+        if ROSTER_TITLE_KEYWORDS_RE.search(title):
+            return letter
+    return None
+
+
 def locate_franchisee_list_section(full_text: str) -> tuple[str, str] | None:
     """The real Step 3.3 entry point: find wherever the actual per-unit
     franchisee list lives, which is usually a lettered Exhibit rather than
@@ -106,7 +171,19 @@ def locate_franchisee_list_section(full_text: str) -> tuple[str, str] | None:
     source_label is e.g. "exhibit_O" or "item_20_body", useful for
     fdd_filings provenance/debugging. None if nothing could be located
     deterministically (candidate for Agent 1 escalation).
+
+    Priority: an exhibit whose own title identifies it as the roster, then
+    an exhibit named by the front-matter cross-reference sentence (a
+    narrower signal -- can point at a related-but-wrong disclosure like
+    transfers or closures instead), then Item 20's own body as a last
+    resort.
     """
+    roster_letter = find_roster_exhibit_letter(full_text)
+    if roster_letter:
+        section = locate_exhibit_section(full_text, roster_letter)
+        if section:
+            return section, f"exhibit_{roster_letter}"
+
     for letter in find_referenced_exhibit_letters(full_text):
         section = locate_exhibit_section(full_text, letter)
         if section:

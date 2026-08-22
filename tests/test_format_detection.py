@@ -1,5 +1,7 @@
 from pipeline.parsing.format_detection import (
     find_referenced_exhibit_letters,
+    find_roster_exhibit_letter,
+    list_exhibit_titles,
     locate_franchisee_list_section,
     locate_item_20_section,
 )
@@ -56,7 +58,7 @@ franchisee? franchisees. You can contact them to ask about their experiences.
 TABLE OF CONTENTS
 ITEM 20 OUTLETS AND FRANCHISEE INFORMATION ................................................................... 57
 ITEM 21 FINANCIAL STATEMENTS ........................................................................................... 60
-EXHIBIT O LIST OF FRANCHISEES ........................................................................................... 200
+EXHIBIT O MISCELLANEOUS DISCLOSURE ................................................................................. 200
 EXHIBIT P LIST OF FRANCHISEES ........................................................................................... 210
 
 ITEM 20
@@ -105,3 +107,91 @@ def test_falls_back_to_item_20_body_when_referenced_exhibit_not_found():
 def test_find_referenced_exhibit_letters():
     assert find_referenced_exhibit_letters(SAMPLE_FDD_WITH_EXHIBIT) == ["P", "R"]
     assert find_referenced_exhibit_letters("nothing relevant here") == []
+
+
+# Mirrors the real Wendy's case: the front-matter sentence names Exhibits P
+# and R, but neither is the actual roster (P = transfers, R = closures) --
+# the real roster is Exhibit O, "OPERATING OUTLETS BY STATE", never
+# mentioned by that sentence at all. Title-matching must win.
+SAMPLE_FDD_WENDYS_LIKE = """
+What's it like to be a Wendy's Item 20 or Exhibits P and R list current and former
+franchisee? franchisees. You can contact them to ask about their experiences.
+
+TABLE OF CONTENTS
+ITEM 20 OUTLETS AND FRANCHISEE INFORMATION ................................................................... 57
+ITEM 21 FINANCIAL STATEMENTS ........................................................................................... 60
+EXHIBIT O - OPERATING OUTLETS BY STATE .............................................................................. 200
+EXHIBIT P - RECENT TRANSFERS .......................................................................................... 210
+EXHIBIT R - RESTAURANT CLOSURES ..................................................................................... 220
+
+ITEM 20
+OUTLETS AND FRANCHISEE INFORMATION
+Table No. 1
+Systemwide Outlet Summary
+2024  500  20  520
+
+ITEM 21
+FINANCIAL STATEMENTS
+Some unrelated Item 21 body content here.
+
+EXHIBIT O
+OPERATING OUTLETS BY STATE
+Sunrise Restaurant Group LLC\t123 Main St\tMadison\tWI\t53703\t608-555-0100\tOperating
+KBP Foods Inc\t456 Elm St\tGreen Bay\tWI\t54301\t920-555-0199\tOperating
+
+EXHIBIT P
+RECENT TRANSFERS
+Some Transfer LLC\t789 Oak St\tKenosha\tWI\t53140\t262-555-0177\tTransferred
+
+EXHIBIT R
+RESTAURANT CLOSURES
+Some Closed LLC\t111 Pine St\tRacine\tWI\t53401\t414-555-0199\tClosed
+"""
+
+
+def test_prefers_title_matched_roster_exhibit_over_front_matter_reference():
+    result = locate_franchisee_list_section(SAMPLE_FDD_WENDYS_LIKE)
+    assert result is not None
+    section, source = result
+    assert source == "exhibit_O"
+    assert "Sunrise Restaurant Group LLC" in section
+    assert "KBP Foods Inc" in section
+    assert "Some Transfer LLC" not in section
+    assert "Some Closed LLC" not in section
+
+
+def test_falls_back_to_referenced_exhibit_when_no_title_matches():
+    text = SAMPLE_FDD_WENDYS_LIKE.replace("OPERATING OUTLETS BY STATE", "MISC DISCLOSURE")
+    result = locate_franchisee_list_section(text)
+    assert result is not None
+    section, source = result
+    assert source == "exhibit_P"
+
+
+def test_find_roster_exhibit_letter():
+    assert find_roster_exhibit_letter(SAMPLE_FDD_WENDYS_LIKE) == "O"
+    assert find_roster_exhibit_letter("nothing relevant") is None
+
+
+def test_list_exhibit_titles():
+    titles = list_exhibit_titles(SAMPLE_FDD_WENDYS_LIKE)
+    assert titles["O"].startswith("OPERATING OUTLETS BY STATE")
+    assert titles["P"].startswith("RECENT TRANSFERS")
+    assert titles["R"].startswith("RESTAURANT CLOSURES")
+
+
+def test_list_exhibit_titles_excludes_nested_document_exhibits():
+    # A franchise agreement attached as its own exhibit can have internal
+    # "EXHIBIT A/B/C..." headings for lease/deed paperwork, appearing after
+    # Item 20's real body -- must not be picked up as the FDD's own list.
+    text = SAMPLE_FDD_WENDYS_LIKE + """
+EXHIBIT Z
+FORM OF FRANCHISE AGREEMENT
+EXHIBIT A
+BILL OF SALE
+EXHIBIT B
+GENERAL RELEASE
+"""
+    titles = list_exhibit_titles(text)
+    assert "A" not in titles
+    assert "B" not in titles

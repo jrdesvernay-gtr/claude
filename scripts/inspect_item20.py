@@ -20,7 +20,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from pipeline.parsing.format_detection import (  # noqa: E402
     find_referenced_exhibit_letters,
+    find_roster_exhibit_letter,
     is_text_native,
+    list_exhibit_titles,
     locate_exhibit_section,
     locate_franchisee_list_section,
     structural_fingerprint,
@@ -86,13 +88,25 @@ def inspect(pdf_path: Path) -> None:
     show_all_item20_occurrences(full_text)
     show_list_of_exhibits(full_text)
 
-    letters = find_referenced_exhibit_letters(full_text)
-    print(f"  Referenced exhibit letter(s): {letters or '(none found)'}")
+    titles = list_exhibit_titles(full_text)
+    print(f"  Exhibit titles found in front matter: {titles or '(none)'}")
 
-    if not letters:
+    roster_letter = find_roster_exhibit_letter(full_text)
+    print(f"  Title-matched roster exhibit: {roster_letter or '(none)'}")
+
+    letters = find_referenced_exhibit_letters(full_text)
+    print(f"  Front-matter-referenced exhibit letter(s): {letters or '(none found)'}")
+
+    # Show every candidate exhibit (title match plus every referenced
+    # letter), not just whichever locate_franchisee_list_section() would
+    # pick -- useful for comparing them side by side while validating.
+    candidate_letters = ([roster_letter] if roster_letter else []) + [
+        l for l in letters if l != roster_letter
+    ]
+    if not candidate_letters:
         result = locate_franchisee_list_section(full_text)
         if result is None:
-            print("  Franchisee list section NOT FOUND (neither a referenced exhibit nor Item 20's own body).")
+            print("  Franchisee list section NOT FOUND (no title match, no referenced exhibit, no Item 20 body).")
             out_path = pdf_path.with_suffix(".fulltext.txt")
             out_path.write_text(full_text)
             print(f"  Saved full extracted text to {out_path} for manual inspection.")
@@ -100,11 +114,8 @@ def inspect(pdf_path: Path) -> None:
         show_section(pdf_path, *result)
         return
 
-    # Show EVERY referenced exhibit, not just the first that resolves --
-    # confirmed live (Wendy's Exhibit P) that "first resolvable" can be a
-    # small unrelated exhibit (2 pages, looks like a departures list) while
-    # the real multi-thousand-row roster is a different referenced letter.
-    for letter in letters:
+    print(f"\n  >>> locate_franchisee_list_section() would pick: exhibit_{candidate_letters[0]} <<<")
+    for letter in candidate_letters:
         section = locate_exhibit_section(full_text, letter)
         if section is None:
             print(f"  Exhibit {letter}: heading not found in document.")
