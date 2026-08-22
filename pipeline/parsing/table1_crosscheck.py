@@ -22,22 +22,33 @@ from pipeline.parsing.format_detection import TABLE1_HEADER_RE
 # Confirmed live: Item 20's body has SEVERAL different tables (Table No. 1
 # Systemwide Outlet Summary, plus Transfers, franchised-outlet-status-change,
 # state-by-state breakdowns, etc.), each with its own "Total ... NNN" row.
-# Searching for "total...NNN" anywhere in the whole body and taking the last
+# Searching for "total...NNN" anywhere in the whole body and taking the LAST
 # match picked up numbers from the WRONG table entirely -- e.g. McDonald's
-# real Table No. 1 shows "Total Outlets 2023 13,455 ... 2025 ...", but the
-# old unscoped search returned 685 (actually a Company-Owned count from a
+# real Table No. 1 shows "Total Outlets 2023 13,455 ... 2025 ...", but an
+# unscoped last-match search returned 685 (a Company-Owned count from a
 # nearby but different line); Wendy's real Table 1 shows "Total Outlets 2023
-# 5,994 6,030 ...", but the old search returned 4033 from an unrelated
-# by-state sub-table. Scope the search to right after the real Table No. 1 /
-# Systemwide Outlet Summary heading, look specifically for "Total Outlets"
-# (not just "total"), and take the largest number found there (pdfplumber's
-# column-merge interleaving mixes several years' start/end/change figures
-# into one line -- the true outlet count is the largest of them, not
-# necessarily the first or last).
-# "Total Units" for licensee-vocabulary franchisors (confirmed live: Taco
-# Bell) -- same Outlets/Units split as TABLE1_HEADER_RE.
-TOTAL_OUTLETS_RE = re.compile(r"total\s+(?:outlets|units)(.{0,300})", re.IGNORECASE | re.DOTALL)
-NEXT_TABLE_HEADER_RE = re.compile(r"table\s*(no\.?)?\s*\d+", re.IGNORECASE)
+# 5,994 6,030 ...", but returned 4033 from an unrelated by-state sub-table.
+#
+# An earlier fix scoped the search to a window starting right after the
+# Table No. 1 / Systemwide Outlet Summary heading match, requiring an
+# "Outlets"/"Units" suffix on "Total". Confirmed live that's also wrong for
+# some real filings: Taco Bell's real Table 1 total line is bare "Total 2023
+# 239 236 -3 / 2024 236..." (no "Outlets"/"Units" word at all), AND it
+# appears in the raw extracted text BEFORE the literal "Table No. 1" heading
+# text -- pdfplumber's column-layout extraction scrambled their order (the
+# same interleaving problem seen elsewhere in this pipeline), so a window
+# starting after the header missed it entirely.
+#
+# Table No. 1 is always the FIRST table FTC-mandated Item 20 lists (before
+# Transfers, status-change, state breakdowns, etc.), so instead of trying to
+# bound a window by position -- unreliable once interleaving can put the
+# heading text out of order relative to its own data -- just take the FIRST
+# "total"-line in the whole body, preferring one with an explicit
+# Outlets/Units suffix (reduces the odds of matching some other, later
+# table's total by coincidence) and falling back to a bare "Total" if no
+# suffixed one is found.
+TOTAL_SUFFIXED_RE = re.compile(r"total\s+(?:outlets|units)(.{0,300})", re.IGNORECASE | re.DOTALL)
+TOTAL_BARE_RE = re.compile(r"total(.{0,300})", re.IGNORECASE | re.DOTALL)
 
 
 def extract_table1_outlet_count(item_20_text: str) -> int | None:
@@ -46,16 +57,12 @@ def extract_table1_outlet_count(item_20_text: str) -> int | None:
     callers should treat that as "cannot verify" and flag for review rather
     than assume a match.
     """
-    header = TABLE1_HEADER_RE.search(item_20_text)
-    if header is None:
+    if TABLE1_HEADER_RE.search(item_20_text) is None:
+        # Gate on a real Table No. 1 actually being present, but don't
+        # bound the search to "after" it -- see module comment above.
         return None
 
-    window_start = header.end()
-    next_table = NEXT_TABLE_HEADER_RE.search(item_20_text, window_start)
-    window_end = next_table.start() if next_table else min(len(item_20_text), window_start + 3000)
-    window = item_20_text[window_start:window_end]
-
-    m = TOTAL_OUTLETS_RE.search(window)
+    m = TOTAL_SUFFIXED_RE.search(item_20_text) or TOTAL_BARE_RE.search(item_20_text)
     if m is None:
         return None
 

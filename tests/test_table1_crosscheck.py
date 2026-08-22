@@ -58,6 +58,28 @@ def test_extracts_table1_total_units_vocabulary():
     assert extract_table1_outlet_count(SAMPLE_TABLE1_UNITS_VOCAB) == 224
 
 
+# Mirrors the real Taco Bell WI filing exactly: the grand total line is
+# bare "Total 2023 239 236 -3 / 2024 236..." (no "Outlets"/"Units" suffix
+# at all), and it appears in the raw extracted text BEFORE the literal
+# "Table No. 1" heading text -- pdfplumber's column-layout extraction
+# scrambled their order. A version of this code that required an
+# Outlets/Units suffix, or that only searched a window starting after the
+# header match, missed this real total entirely and returned None.
+SAMPLE_TABLE1_BARE_TOTAL_OUT_OF_ORDER = """
+Franchised 2023 232 2024 229 -3
+Company-Owned 2023 7 2024 7 0
+Total 2023 239 236 -3
+
+Table No. 1
+Systemwide Unit Summary
+For Years 2023 to 2025
+"""
+
+
+def test_extracts_bare_total_that_appears_before_the_header_text():
+    assert extract_table1_outlet_count(SAMPLE_TABLE1_BARE_TOTAL_OUT_OF_ORDER) == 239
+
+
 def test_crosscheck_match_clears_review_flag():
     filing = FddFiling(franchisor_name="Wendy's", state="WI", source_url="http://x")
     rows = [ItemRow(franchisee_raw=f"Entity {i} LLC") for i in range(5943)]
