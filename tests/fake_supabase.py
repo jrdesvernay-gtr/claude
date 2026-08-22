@@ -20,17 +20,28 @@ class _Query:
         self.payload = payload
         self._eq_field = None
         self._eq_value = None
+        self._not_null_field = None
         self._limit = None
         self._select_cols = None
         self._on_conflict = None
 
     def select(self, cols):
-        self._select_cols = [c.strip() for c in cols.split(",")]
+        self._select_cols = None if cols == "*" else [c.strip() for c in cols.split(",")]
         return self
 
     def eq(self, field, value):
         self._eq_field = field
         self._eq_value = value
+        return self
+
+    @property
+    def not_(self):
+        return self
+
+    def is_(self, field, value):
+        # Only "null" is used anywhere in this codebase (load_persisted_handlers).
+        if value == "null":
+            self._not_null_field = field
         return self
 
     def limit(self, n):
@@ -42,6 +53,8 @@ class _Query:
             rows = self.table.rows
             if self._eq_field:
                 rows = [r for r in rows if r.get(self._eq_field) == self._eq_value]
+            if self._not_null_field:
+                rows = [r for r in rows if r.get(self._not_null_field) is not None]
             if self._limit:
                 rows = rows[: self._limit]
             if self._select_cols:

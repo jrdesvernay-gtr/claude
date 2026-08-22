@@ -62,7 +62,7 @@ def test_fenced_response_with_leading_prose_is_still_extracted():
 
 def test_response_without_parse_function_raises_with_raw_response_visible():
     with patch(COMPLETE, return_value="I couldn't figure out the format."):
-        with pytest.raises(ValueError, match="Raw response"):
+        with pytest.raises(ValueError, match="did not define a parse"):
             draft_handler("WI", "garbage\n", {"delimiter": "fixed_width"})
 
 

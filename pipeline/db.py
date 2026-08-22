@@ -131,6 +131,13 @@ def insert_units(
 
 
 def sync_handler_registry(client, handler) -> None:
+    """Persist a handler's current state. For an agent-drafted handler this
+    includes its raw source and match fingerprint, not just bookkeeping
+    fields -- without those there'd be nothing in Supabase to actually
+    reconstruct a working handler from on the next process's startup (see
+    load_persisted_handlers()), and every filing would keep re-drafting from
+    scratch regardless of how many times sync ran.
+    """
     payload = {
         "id": handler.id,
         "state": handler.state,
@@ -138,5 +145,53 @@ def sync_handler_registry(client, handler) -> None:
         "source": handler.source,
         "probation_runs_remaining": handler.probation_runs_remaining,
         "confidence_score": handler.confidence_score,
+        "fingerprint": handler.fingerprint,
+        "fn_source": handler.fn_source,
     }
     client.table("handler_registry").upsert(payload, on_conflict="id").execute()
+
+
+def load_persisted_handlers(client) -> int:
+    """Reconstitute every persisted agent-drafted handler into the
+    in-process registry, preserving its earned probation state (does NOT
+    reset probation the way a fresh draft does). Call this once at pipeline
+    startup, before processing any filings, so a handler that already
+    proved itself on a past run gets reused instead of every filing
+    re-drafting from scratch. Returns the count loaded.
+
+    Deterministic handlers (wi_standard_v1 etc.) aren't stored here -- they
+    register themselves at import time via pipeline.parsing.handlers, same
+    as always.
+    """
+    from pipeline.agents.handler_sandbox import compile_handler_code
+    from pipeline.parsing.handler_registry import registry
+
+    rows = (
+        client.table("handler_registry")
+        .select("*")
+        .eq("source", "agent_drafted")
+        .not_.is_("fn_source", "null")
+        .execute()
+        .data
+    )
+    loaded = 0
+    for row in rows:
+        try:
+            fn = compile_handler_code(row["fn_source"], source_label=f" (reloaded handler {row['id']})")
+        except ValueError:
+            # A handler persisted under an older sandbox/prompt version
+            # could fail today's stricter check -- skip it rather than
+            # crash startup; it'll just get re-drafted next time it's needed.
+            continue
+        registry.register_persisted(
+            handler_id=row["id"],
+            state=row["state"],
+            description=row["description"] or "",
+            fn=fn,
+            fingerprint=row["fingerprint"] or {},
+            fn_source=row["fn_source"],
+            probation_runs_remaining=row["probation_runs_remaining"],
+            confidence_score=row["confidence_score"],
+        )
+        loaded += 1
+    return loaded

@@ -33,6 +33,20 @@ log = logging.getLogger(__name__)
 PORTAL_CLIENTS = {"WI": WiPortalClient, "MN": MnPortalClient}
 
 
+def bootstrap_handler_registry(client) -> int:
+    """Call once at pipeline startup, before processing any filings, to
+    reload previously-persisted agent-drafted handlers from Supabase into
+    the in-process registry. Without this, every filing re-drafts a handler
+    from scratch each process run regardless of how many times a format was
+    already seen and proven -- see pipeline.db.load_persisted_handlers() and
+    pipeline.parsing.handler_registry.register_agent_drafted()'s fingerprint
+    matching. Returns the count of handlers loaded.
+    """
+    from pipeline import db
+
+    return db.load_persisted_handlers(client)
+
+
 def find_filing_for_franchisor(franchisor_name: str):
     """Step 2/3.1: search WI first, then MN, per v1 scope. Stop at first hit."""
     for portal in v1_scoped_portals():

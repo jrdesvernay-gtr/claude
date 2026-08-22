@@ -129,6 +129,8 @@ create table if not exists handler_registry (
     source                text not null default 'deterministic' check (source in ('deterministic', 'agent_drafted')),
     probation_runs_remaining int not null default 0,  -- >0 while probationary; agent-drafted handlers start at 3
     confidence_score       numeric(3,2) not null default 1.00,
+    fingerprint             jsonb,                    -- agent-drafted only: fingerprint_signature() output this handler matches on reload
+    fn_source               text,                     -- agent-drafted only: raw drafted `def parse(...)` source, re-exec'd on reload
     created_at              timestamptz not null default now(),
     updated_at              timestamptz not null default now()
 );
