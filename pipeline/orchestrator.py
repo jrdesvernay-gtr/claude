@@ -121,6 +121,17 @@ def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
     """
     item_20_text, section_source, section_locator_confidence = locate_franchisee_list_section(full_text)
 
+    # Table No. 1 (Systemwide Outlet Summary), which apply_crosscheck() reads
+    # its verification count from, lives in Item 20's own narrative body --
+    # NOT in the roster section itself when the roster is deferred to a
+    # separately-lettered exhibit (confirmed live: McDonald's roster is
+    # Exhibit R, which has no Table 1 in it at all, so cross-checking
+    # against item_20_text alone always came back "can't verify" for any
+    # exhibit-sourced filing, regardless of whether the parse was actually
+    # correct). Look it up separately so the hard gate has real numbers to
+    # compare against.
+    item_20_body_text = locate_item_20_section(full_text) or item_20_text
+
     fingerprint = structural_fingerprint(item_20_text)
     handler = registry.find_match(state, fingerprint)
 
@@ -144,7 +155,7 @@ def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
         section_source=section_source,
         section_locator_confidence=section_locator_confidence,
     )
-    filing = apply_crosscheck(filing, rows, item_20_text)
+    filing = apply_crosscheck(filing, rows, item_20_body_text)
 
     if not filing.review_flag:
         registry.record_clean_run(handler.id)  # advances agent-drafted handlers off probation

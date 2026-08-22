@@ -2,6 +2,15 @@
 Item 20 Table No. 1 Systemwide Outlet Summary. A free, built-in verification
 that needs no external data source. Mismatch blocks the write and flags the
 filing for review.
+
+Table No. 1 lives in Item 20's own narrative body, not necessarily wherever
+the per-unit roster itself ended up -- confirmed live: when the roster is
+deferred to a separately-lettered exhibit (e.g. McDonald's Exhibit R), that
+exhibit has no Table 1 in it at all. Callers must pass Item 20's own body
+text here (pipeline.parsing.format_detection.locate_item_20_section), NOT
+whatever section the roster was parsed from -- passing the roster section
+instead makes extract_table1_outlet_count() silently return None for every
+exhibit-sourced filing, regardless of whether the parse was correct.
 """
 from __future__ import annotations
 
