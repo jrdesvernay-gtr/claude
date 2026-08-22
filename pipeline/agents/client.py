@@ -25,4 +25,16 @@ def complete(system: str, user: str, max_tokens: int = 2048) -> str:
         system=system,
         messages=[{"role": "user", "content": user}],
     )
-    return "".join(block.text for block in resp.content if block.type == "text")
+    text = "".join(block.text for block in resp.content if block.type == "text")
+    if not text:
+        # Confirmed live: a silently empty string here (e.g. the response
+        # had no text block at all) surfaced downstream as a generic
+        # "did not define a parse() function" with no way to tell an empty
+        # API response apart from a genuine bad draft. Surface the actual
+        # cause instead of guessing.
+        block_types = [block.type for block in resp.content]
+        raise RuntimeError(
+            f"Claude API returned no text content "
+            f"(stop_reason={resp.stop_reason!r}, block_types={block_types})"
+        )
+    return text
