@@ -1,77 +1,136 @@
-"""MN Commerce Franchise Registration Search —
-https://www.cards.commerce.state.mn.us/franchise-registrations
+"""MN Commerce Franchise Registration Search --
+https://cards.web.commerce.state.mn.us/franchise-registrations
 
-Document-level (not filing-level): must filter document_type to Final/Clean
-FDD, not Marked FDD. Confirmed clean/no-CAPTCHA as of 2026-08-21 (see
-data/reference/fdd-registration-portals.csv).
+Live-verified flow (2026-08-22, against "Quality Is Our Recipe, LLC" / Wendy's).
 
-NOTE: same caveat as portals/wi.py — this environment's network egress to
-state portals is blocked, so selectors below are unverified against the live
-DOM. Confirm before first real run.
+Document type: search "Clean FDD" first, "Final FDD" second (only fall back
+if Clean FDD returns nothing) -- NOT "Marked FDD", which is a redline/diff
+document (confirmed by "Redlined FDD" notes on those rows), not the clean
+filed document Item 20 needs to be parsed from. "Final FDD" returned zero
+results for Wendy's specifically, but the label exists in the dropdown and
+may be what other franchisors use, so it's a fallback rather than dropped
+entirely.
+
+Results table columns (from the live page): # | Document | Franchisor |
+Franchise names | Document types | Year | File number | Notes | Received
+date | Added on. The "Document" column links straight to a download URL
+(/documents/{GUID}/download?...) -- confirmed by no page/URL change on
+click, i.e. a direct file response, not an intermediate page.
+
+Uses Playwright (real browser) rather than raw HTTP requests: driving the
+actual form via visible labels survives markup/param-name changes better
+than hardcoding query-string keys, and downloads are captured through the
+browser's own download handling rather than assumed to be an unauthenticated
+plain GET.
 """
 from __future__ import annotations
 
-from pipeline.portals.base import SearchHit, request_with_backoff
+import time
 
-BASE_URL = "https://www.cards.commerce.state.mn.us/franchise-registrations"
+from pipeline.portals.base import SearchHit
 
-# MN's document type labels we accept vs. reject for parsing.
-ACCEPTED_DOCUMENT_LABELS = {"final fdd", "clean fdd"}
-REJECTED_DOCUMENT_LABELS = {"marked fdd"}
+BASE_URL = "https://cards.web.commerce.state.mn.us/franchise-registrations"
+
+DOCUMENT_TYPE_PRIORITY = ["Clean FDD", "Final FDD"]
+
+_RETRY_BACKOFF = (2, 4, 8)
 
 
-def _classify_document_type(label: str) -> str:
-    normalized = label.strip().lower()
-    if normalized in ACCEPTED_DOCUMENT_LABELS:
-        return "final_fdd" if "final" in normalized else "clean_fdd"
-    if normalized in REJECTED_DOCUMENT_LABELS:
-        return "marked_fdd"
-    return "unknown"
+def _with_retries(fn):
+    last_exc: Exception | None = None
+    for attempt, delay in enumerate((0,) + _RETRY_BACKOFF):
+        if delay:
+            time.sleep(delay)
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 - retry on any transient browser/network error
+            last_exc = exc
+    assert last_exc is not None
+    raise last_exc
+
+
+def _document_type_key(label: str) -> str:
+    return label.strip().lower().replace(" ", "_")
 
 
 class MnPortalClient:
-    def __init__(self) -> None:
-        self.session = None
-
-    def _ensure_session(self):
-        import requests
-
-        if self.session is None:
-            self.session = requests.Session()
-        return self.session
-
     def search(self, franchisor_name: str) -> list[SearchHit]:
-        self._ensure_session()
-        # TODO(confirm on first live run): exact query param / form field name.
-        resp = request_with_backoff("GET", BASE_URL, params={"name": franchisor_name})
-        return self._parse_results(resp.text, franchisor_name)
+        def run():
+            from playwright.sync_api import sync_playwright
 
-    def _parse_results(self, html: str, franchisor_name: str) -> list[SearchHit]:
-        from bs4 import BeautifulSoup
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                try:
+                    page = browser.new_page()
+                    for doc_type in DOCUMENT_TYPE_PRIORITY:
+                        hits = self._search_one_document_type(page, franchisor_name, doc_type)
+                        if hits:
+                            return hits
+                    return []
+                finally:
+                    browser.close()
 
-        soup = BeautifulSoup(html, "html.parser")
+        return _with_retries(run)
+
+    def _search_one_document_type(self, page, franchisor_name: str, doc_type: str) -> list[SearchHit]:
+        page.goto(BASE_URL, wait_until="networkidle")
+        page.get_by_label("Franchisor:").fill(franchisor_name)
+        page.get_by_label("Document type:").select_option(label=doc_type)
+        page.get_by_role("button", name="Search").click()
+        page.wait_for_load_state("networkidle")
+
+        table = page.locator("table").first
+        header_cells = table.locator("tr").first.locator("th, td").all_inner_texts()
+        col_index = {h.strip().lower(): i for i, h in enumerate(header_cells)}
+        year_idx = col_index.get("year")
+
         hits: list[SearchHit] = []
-        # TODO(confirm on first live run): actual result-row / document-type-label selector.
-        for row in soup.select("table.registrations tr"):
-            link = row.find("a", href=True)
-            doc_type_cell = row.find(class_="document-type")
-            if not link or not doc_type_cell:
+        seen_file_numbers: set[str] = set()
+        rows = table.locator("tr").all()
+        for row in rows:
+            doc_link = row.locator("a[href*='/documents/']")
+            if doc_link.count() == 0:
                 continue
-            doc_type = _classify_document_type(doc_type_cell.get_text())
-            if doc_type not in ("final_fdd", "clean_fdd"):
-                continue  # filter out Marked FDD per scope
+
+            file_number = doc_link.first.inner_text().strip()
+            if file_number in seen_file_numbers:
+                continue  # de-dupe rows split across multiple franchise-name lines
+            seen_file_numbers.add(file_number)
+
+            href = doc_link.first.get_attribute("href")
+            if not href:
+                continue
+
+            filing_year = None
+            if year_idx is not None:
+                cells = row.locator("td").all_inner_texts()
+                if year_idx < len(cells) and cells[year_idx].strip().isdigit():
+                    filing_year = int(cells[year_idx].strip())
+
             hits.append(
                 SearchHit(
                     franchisor_name=franchisor_name,
-                    filing_url=link["href"] if link["href"].startswith("http") else BASE_URL + link["href"],
-                    document_type=doc_type,
+                    filing_url=href if href.startswith("http") else f"https://cards.web.commerce.state.mn.us{href}",
+                    filing_year=filing_year,
+                    document_type=_document_type_key(doc_type),
                 )
             )
         return hits
 
     def download(self, hit: SearchHit, dest_path: str) -> str:
-        self._ensure_session()
-        resp = request_with_backoff("GET", hit.filing_url)
-        with open(dest_path, "wb") as f:
-            f.write(resp.content)
-        return dest_path
+        def run():
+            from playwright.sync_api import sync_playwright
+
+            with sync_playwright() as p:
+                browser = p.chromium.launch()
+                try:
+                    page = browser.new_page()
+                    with page.expect_download() as download_info:
+                        page.goto(hit.filing_url)
+                    download = download_info.value
+                    download.save_as(dest_path)
+                finally:
+                    browser.close()
+            return dest_path
+
+        return _with_retries(run)

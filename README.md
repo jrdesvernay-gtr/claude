@@ -49,13 +49,42 @@ CAPTCHA-gated and FRED-dependent states, plus contact-only states (MI, WA,
 HI), are permanently out of scope per the non-negotiable constraint against
 bypassing CAPTCHA/bot-detection.
 
+## Portal scraping: Playwright, not raw HTTP
+
+`pipeline/portals/wi.py` and `mn.py` drive a real headless browser
+(Playwright) rather than hand-rolled `requests` calls, live-verified
+2026-08-22 against real WI/MN searches for Wendy's:
+
+- **WI** runs on classic ASP.NET WebForms — search and the FDD download are
+  both synchronous postbacks (the download button hijacks the HTTP response
+  with the PDF instead of re-rendering the page). Playwright handles the
+  viewstate/postback machinery automatically instead of us harvesting hidden
+  fields by hand.
+- **MN** is a plain query-string search, but the document type matters:
+  search `Clean FDD` first, falling back to `Final FDD` only if that returns
+  nothing — never `Marked FDD` (that's a redline/diff document, not the
+  clean filed FDD Item 20 needs to be parsed from).
+- Both clients select elements by **visible label/role text**
+  (`get_by_label(...)`, `get_by_role("button", name=...)`) rather than exact
+  field names or CSS paths, specifically to survive markup churn without
+  needing a manual re-scrape every time a state tweaks their site.
+
+Requires a one-time browser install: `python3 -m playwright install
+chromium`. Test against real franchisors with:
+```
+python3 scripts/test_scrape_3_franchisors.py            # Wendy's, McDonald's, Taco Bell
+python3 scripts/test_scrape_3_franchisors.py "Subway" "Domino's Pizza"
+```
+This tests search + download only (Step 2/3.1-3.2) — not parsing, since the
+Item 20 table-layout handlers (`wi_standard_v1`, `mn_pipe_delim_v1`) are
+still unverified against a real downloaded PDF's structure. If Playwright's
+label/role selectors turn out too brittle in practice, the fallback plan is
+an AI browser agent (browser-use/Skyvern) for search+download, kept
+consistent with the project's deterministic-first/agent-as-fallback
+principle rather than making that the default path.
+
 ## Known gaps / next steps
 
-- **Portal selectors are unverified.** This environment's network egress to
-  state portals is blocked, so `pipeline/portals/wi.py` and `mn.py` are
-  written against the portals' known public workflow but the exact
-  form-field names and result-table selectors (marked `TODO`) need
-  confirming against the live DOM before the first real run.
 - **Supabase project is provisioned and schema applied** — project
   `kgbpftfwbvaxzhjjrehx` ("Relay - Franchisee", us-east-1). All 5 tables,
   the rollup trigger, and `franchisee_units_view` are live. RLS is
