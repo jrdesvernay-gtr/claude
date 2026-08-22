@@ -45,7 +45,7 @@ def show_all_item20_occurrences(full_text: str) -> None:
     print("  --- All 'item 20' occurrences (context) ---")
     for m in re.finditer(r"item\s*20", full_text, re.IGNORECASE):
         start = max(0, m.start() - 30)
-        end = min(len(full_text), m.end() + 30)
+        end = min(len(full_text), m.end() + 150)
         snippet = full_text[start:end].replace("\n", "\\n")
         print(f"    @{m.start()}: ...{snippet}...")
 
