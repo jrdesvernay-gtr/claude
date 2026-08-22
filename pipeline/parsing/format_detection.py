@@ -82,11 +82,15 @@ def find_referenced_exhibit_letters(full_text: str) -> list[str]:
     reference sentence, e.g. "...Exhibits P and R..." -> ['P', 'R'].
     Returns [] if that sentence isn't found (some FDDs may put the list
     directly under Item 20 instead of deferring to an exhibit).
+
+    Matches 1-2 letter codes (A, ..., Z, AA, BB, ...) -- FDDs with more
+    than 26 exhibits continue with doubled letters, and a single-letter-only
+    pattern would silently mis-parse "Exhibit AA" as just "A".
     """
     m = EXHIBIT_REFERENCE_SENTENCE_RE.search(full_text)
     if not m:
         return []
-    return re.findall(r"\b[A-Z]\b", m.group())
+    return re.findall(r"\b[A-Z]{1,2}\b", m.group())
 
 
 def locate_exhibit_section(full_text: str, letter: str) -> str | None:
@@ -100,7 +104,9 @@ def locate_exhibit_section(full_text: str, letter: str) -> str | None:
     if not matches:
         return None
     start = matches[-1].start()
-    boundary_re = re.compile(r"\bEXHIBIT\s+[A-Z]\b|\bITEM\s*\d+\b")
+    # 1-2 letter exhibit codes (A..Z, then AA, BB, ...) for the same reason
+    # as find_referenced_exhibit_letters above.
+    boundary_re = re.compile(r"\bEXHIBIT\s+[A-Z]{1,2}\b|\bITEM\s*\d+\b")
     next_match = boundary_re.search(full_text, start + len(matches[-1].group()))
     end = next_match.start() if next_match else len(full_text)
     return full_text[start:end]
@@ -111,7 +117,7 @@ def locate_exhibit_section(full_text: str, letter: str) -> str | None:
 # never mentions Exhibit O at all, even though O ("OPERATING OUTLETS BY
 # STATE") is the real current-outlet roster. An exhibit's own TITLE is a
 # stronger, more direct signal of what it actually contains.
-EXHIBIT_HEADING_RE = re.compile(r'^EXHIBIT\s+["“]?([A-Z])["”]?\s*[-–—]?\s*(.*)$')
+EXHIBIT_HEADING_RE = re.compile(r'^EXHIBIT\s+["“]?([A-Z]{1,2})["”]?\s*[-–—]?\s*(.*)$')
 ROSTER_TITLE_KEYWORDS_RE = re.compile(
     r"OPERATING\s+OUTLETS|LIST\s+OF\s+(?:CURRENT\s+)?(?:FRANCHISEES|LICENSEES|OUTLETS)|"
     r"OUTLETS?\s+(?:BY|LIST)|CURRENT\s+(?:FRANCHISEES|LICENSEES|OUTLETS|UNITS)|"

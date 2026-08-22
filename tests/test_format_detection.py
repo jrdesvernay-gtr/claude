@@ -195,3 +195,47 @@ GENERAL RELEASE
     titles = list_exhibit_titles(text)
     assert "A" not in titles
     assert "B" not in titles
+
+
+# FDDs with more than 26 exhibits continue A..Z then AA, BB, ... -- a
+# single-letter-only pattern would mis-parse "Exhibit AA" as just "A".
+SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT = """
+What's it like to be a Burger King Item 20 or Exhibits AA and BB list current and former
+franchisee? franchisees. You can contact them to ask about their experiences.
+
+TABLE OF CONTENTS
+ITEM 20 OUTLETS AND FRANCHISEE INFORMATION ................................................................... 57
+ITEM 21 FINANCIAL STATEMENTS ........................................................................................... 60
+EXHIBIT AA - OPERATING OUTLETS BY STATE ......................................................................... 200
+EXHIBIT BB - RECENT TRANSFERS ......................................................................................... 210
+
+ITEM 20
+OUTLETS AND FRANCHISEE INFORMATION
+Table No. 1
+Systemwide Outlet Summary
+2024  500  20  520
+
+ITEM 21
+FINANCIAL STATEMENTS
+Some unrelated Item 21 body content here.
+
+EXHIBIT AA
+OPERATING OUTLETS BY STATE
+Sunrise Restaurant Group LLC\t123 Main St\tMadison\tWI\t53703\t608-555-0100\tOperating
+
+EXHIBIT BB
+RECENT TRANSFERS
+Some Transfer LLC\t789 Oak St\tKenosha\tWI\t53140\t262-555-0177\tTransferred
+"""
+
+
+def test_handles_double_letter_exhibit_codes():
+    assert find_referenced_exhibit_letters(SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT) == ["AA", "BB"]
+    assert find_roster_exhibit_letter(SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT) == "AA"
+
+    result = locate_franchisee_list_section(SAMPLE_FDD_DOUBLE_LETTER_EXHIBIT)
+    assert result is not None
+    section, source = result
+    assert source == "exhibit_AA"
+    assert "Sunrise Restaurant Group LLC" in section
+    assert "Some Transfer LLC" not in section
