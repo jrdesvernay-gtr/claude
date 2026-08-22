@@ -42,6 +42,22 @@ def test_extracts_table1_total_not_a_different_tables_total():
     assert extract_table1_outlet_count(SAMPLE_TABLE1_MULTI_TABLE) == 13457
 
 
+# Mirrors the real Taco Bell WI filing: a "licensee" system uses "Systemwide
+# Unit Summary" / "Total Units", not "Systemwide Outlet Summary" / "Total
+# Outlets" -- same vocabulary split as ITEM_20_HEADER_RE. The unscoped-search
+# version of this code never matched Taco Bell's real heading at all.
+SAMPLE_TABLE1_UNITS_VOCAB = """
+Table No. 1
+Systemwide Unit Summary
+Year    Franchised    Company-Owned    Total Units
+2024    220            4               224
+"""
+
+
+def test_extracts_table1_total_units_vocabulary():
+    assert extract_table1_outlet_count(SAMPLE_TABLE1_UNITS_VOCAB) == 224
+
+
 def test_crosscheck_match_clears_review_flag():
     filing = FddFiling(franchisor_name="Wendy's", state="WI", source_url="http://x")
     rows = [ItemRow(franchisee_raw=f"Entity {i} LLC") for i in range(5943)]

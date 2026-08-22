@@ -34,7 +34,9 @@ from pipeline.parsing.format_detection import TABLE1_HEADER_RE
 # column-merge interleaving mixes several years' start/end/change figures
 # into one line -- the true outlet count is the largest of them, not
 # necessarily the first or last).
-TOTAL_OUTLETS_RE = re.compile(r"total\s+outlets(.{0,300})", re.IGNORECASE | re.DOTALL)
+# "Total Units" for licensee-vocabulary franchisors (confirmed live: Taco
+# Bell) -- same Outlets/Units split as TABLE1_HEADER_RE.
+TOTAL_OUTLETS_RE = re.compile(r"total\s+(?:outlets|units)(.{0,300})", re.IGNORECASE | re.DOTALL)
 NEXT_TABLE_HEADER_RE = re.compile(r"table\s*(no\.?)?\s*\d+", re.IGNORECASE)
 
 

@@ -85,8 +85,12 @@ ITEM_20_HEADER_RE = re.compile(
     re.IGNORECASE,
 )
 ITEM_21_HEADER_RE = re.compile(r"\bITEM\s*21\b", re.IGNORECASE)
+# A "licensee" system (confirmed live: Taco Bell) uses "Systemwide Unit
+# Summary", not "Systemwide Outlet Summary" -- same Outlets/Units vocabulary
+# split as ITEM_20_HEADER_RE above, so match both here too.
 TABLE1_HEADER_RE = re.compile(
-    r"table\s*(no\.?)?\s*1.{0,80}?systemwide\s+outlet\s+summary", re.IGNORECASE | re.DOTALL
+    r"table\s*(no\.?)?\s*1.{0,80}?systemwide\s+(?:outlet|unit)s?\s+summary",
+    re.IGNORECASE | re.DOTALL,
 )
 
 
