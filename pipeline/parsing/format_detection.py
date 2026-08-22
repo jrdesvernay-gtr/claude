@@ -13,6 +13,41 @@ from __future__ import annotations
 import re
 
 
+MENTION_RE = re.compile(
+    r'item\s*20\b|exhibit\s*["“]?\s*[A-Za-z]{1,2}\b',
+    re.IGNORECASE,
+)
+
+
+def gather_locator_context(full_text: str, max_chars: int = 12000, context_chars: int = 150) -> str:
+    """Cheap, loose raw-text gathering for the section-locator agent: every
+    "Item 20" and "Exhibit X" mention anywhere in the document, each with a
+    little surrounding context and its character position, no attempt made
+    here to decide which one is real.
+
+    This deliberately replaces an earlier design where this module tried to
+    pre-parse the document into a clean {letter: title} dict and a single
+    "the" Item 20 body before handing anything to the agent. That approach
+    broke twice against real FDDs in ways that starved the agent of any
+    signal at all rather than just imperfect signal: a front-matter
+    boundary that turned out to be wrong for Wendy's (its real exhibit list
+    sits after Item 20's heading, not before it), and a case-sensitive
+    regex that silently matched nothing against Taco Bell's real heading
+    ("Item 20" title-case, not "ITEM 20"). Finding candidate occurrences is
+    cheap and hard to get wrong; deciding which one is the real, current-
+    franchisee-roster location is exactly the judgment call that belongs to
+    the agent, not to this module -- so stop trying to pre-interpret it
+    here and just hand over the raw evidence.
+    """
+    snippets = []
+    for m in MENTION_RE.finditer(full_text):
+        start = max(0, m.start() - 15)
+        end = min(len(full_text), m.start() + context_chars)
+        snippet = full_text[start:end].replace("\n", " / ")
+        snippets.append(f"[@{m.start()}] {snippet}")
+    return "\n".join(snippets)[:max_chars]
+
+
 def is_text_native(extracted_text: str, min_chars: int = 200) -> bool:
     """True if a text-layer extraction (e.g. pdfplumber/pdftotext) produced
     enough real content that OCR isn't needed. Below the threshold, the

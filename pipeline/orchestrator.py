@@ -13,8 +13,8 @@ import logging
 from pipeline.config import v1_scoped_portals
 from pipeline.parsing import handlers  # noqa: F401 - registers built-in handlers
 from pipeline.parsing.format_detection import (
+    gather_locator_context,
     is_text_native,
-    list_exhibit_titles,
     locate_exhibit_section,
     locate_item_20_section,
     structural_fingerprint,
@@ -61,13 +61,20 @@ def locate_franchisee_list_section(full_text: str) -> tuple[str, str, float | No
     (exhibit titles, Item 20's own body); the agent makes the judgment call
     of which one is the actual current-franchisee roster.
 
-    Two agent calls, not one: the first picks a candidate location from
-    exhibit titles / Item 20's body alone, which can be wrong (an exhibit
-    titled like a roster that's actually something else). The second reads
-    the first 20 lines of whatever the first call picked and confirms it's
-    really a current-franchisee list before we commit to it -- confirmed
-    live this catches real mistakes cheap deterministic pre-parsing alone
-    can't (e.g. an exhibit title that reads like a roster but isn't one).
+    Two agent calls, not one: the first reads raw "Item 20"/"Exhibit X"
+    mentions gathered from the whole document (see
+    format_detection.gather_locator_context -- deliberately no attempt made
+    there to decide which mention is real) and picks a candidate location,
+    which can still be wrong (an exhibit titled like a roster that's
+    actually something else). The second reads the first 20 lines of
+    whatever the first call picked and confirms it's really a current-
+    franchisee list before we commit to it -- confirmed live this catches
+    real mistakes the first call alone can't (e.g. an exhibit title that
+    reads like a roster but isn't one).
+
+    Once the agent names a location, extracting its actual text is a
+    mechanical slicing job (find this heading, run until the next one) --
+    that part stays deterministic.
 
     Returns (section_text, section_source, confidence). Raises if nothing
     usable was found or verification fails.
@@ -77,18 +84,17 @@ def locate_franchisee_list_section(full_text: str) -> tuple[str, str, float | No
         verify_franchisee_list_via_agent,
     )
 
-    exhibit_titles = list_exhibit_titles(full_text)
-    item_20_body = locate_item_20_section(full_text) or ""
-
-    decision = locate_franchisee_list_via_agent(exhibit_titles, item_20_body)
+    locator_context = gather_locator_context(full_text)
+    decision = locate_franchisee_list_via_agent(locator_context)
 
     section, source = None, None
     if decision.get("location_type") == "exhibit" and decision.get("exhibit_letter"):
         letter = decision["exhibit_letter"]
         section = locate_exhibit_section(full_text, letter)
         source = f"exhibit_{letter}"
-    elif decision.get("location_type") == "item_20_body" and item_20_body:
-        section, source = item_20_body, "item_20_body"
+    elif decision.get("location_type") == "item_20_body":
+        section = locate_item_20_section(full_text)
+        source = "item_20_body"
 
     if not section:
         raise ValueError(

@@ -7,10 +7,18 @@ Outlets/Units), the list sometimes inside Item 20's own body and sometimes
 deferred to a separately-lettered exhibit whose letter and title wording
 aren't standardized. Chasing every format variant with regex doesn't scale
 to that volume. This is the PRIMARY method for locating the section, not a
-last-resort fallback: deterministic code still does the cheap, mechanical
-text extraction (table of contents, exhibit titles, Item 20's own body --
-see pipeline.parsing.format_detection), but an LLM makes the judgment call
-of which one is actually the current-franchisee roster.
+last-resort fallback.
+
+Deterministic code (pipeline.parsing.format_detection.gather_locator_context)
+does only the cheap, hard-to-get-wrong part: find every raw "Item 20" and
+"Exhibit X" mention in the document, with a little surrounding context. It
+deliberately does NOT try to decide which mention is the real heading, which
+exhibit's title is trustworthy, or where a "list of exhibits" page starts --
+an earlier version of this module tried to pre-parse that structure and
+broke twice against real FDDs (a front-matter boundary wrong for Wendy's,
+a case-sensitive regex that silently matched nothing for Taco Bell), each
+time starving the agent of any signal instead of just imperfect signal.
+Interpreting the raw evidence is the agent's job.
 """
 from __future__ import annotations
 
@@ -18,20 +26,32 @@ import json
 
 from pipeline.agents.client import complete
 
-SYSTEM_PROMPT = """You are given the front matter of a Franchise Disclosure
-Document (FDD): its list of exhibits (with titles), and the text of Item 20
-itself ("Outlets and Franchisee Information" or "Units and Licensee
-Information"). Item 20 is a standard FTC-required section that exists in
-every FDD, but the actual per-unit list of CURRENT, ACTIVE franchisees/
-licensees (with names, addresses, phone numbers) is sometimes inside Item
-20's own body and sometimes deferred to a separately-lettered Exhibit (the
-letter varies by franchisor and by year -- A, B, ... Z, AA, BB, etc., and
-titles aren't standardized wording).
+SYSTEM_PROMPT = """You are given every raw "Item 20" and "Exhibit X" mention
+found anywhere in a Franchise Disclosure Document (FDD), each as a short
+snippet with its character position (e.g. "[@225710] ITEM 20 / OUTLETS AND
+FRANCHISEE INFORMATION..."). These are unfiltered raw matches, not curated:
+expect noise -- a mention in a front-matter summary, a table-of-contents
+entry (often just a letter/number and a page number, no real title), a
+"list of exhibits" page (often with real titles), the actual section
+heading itself, and possibly an embedded document's own internal exhibit
+numbering (e.g. a franchise agreement attached as an exhibit, with its own
+nested Exhibits A, B, C... for leases/deeds/etc. -- not the FDD's own
+top-level exhibits). Character position can help you judge which
+occurrence of a given mention is the real one, but don't assume any fixed
+rule (e.g. "last occurrence wins") -- structure varies by franchisor.
 
-Your job: identify exactly where the CURRENT, ACTIVE per-unit franchisee/
-licensee list lives -- NOT a list of terminated/transferred/closed
-franchisees, NOT the franchise agreement's own attached exhibits (leases,
-bills of sale, etc.), NOT aggregate summary tables (Table No. 1 etc.).
+Item 20 ("Outlets and Franchisee Information" or "Units and Licensee
+Information") is a standard FTC-required section in every FDD, but the
+actual per-unit list of CURRENT, ACTIVE franchisees/licensees (names,
+addresses, phone numbers) is sometimes inside Item 20's own body and
+sometimes deferred to a separately-lettered Exhibit (letter varies by
+franchisor and year -- A, B, ... Z, AA, BB, etc.; title wording isn't
+standardized).
+
+Your job: from the raw mentions alone, identify where the CURRENT, ACTIVE
+per-unit franchisee/licensee list most likely lives -- NOT a list of
+terminated/transferred/closed franchisees, NOT a franchise agreement's own
+attached exhibits, NOT aggregate summary tables (Table No. 1 etc.).
 
 Respond with ONLY a JSON object:
 {"location_type": "exhibit" | "item_20_body" | "not_found",
@@ -41,17 +61,8 @@ Respond with ONLY a JSON object:
 """
 
 
-def locate_franchisee_list_via_agent(
-    exhibit_titles: dict[str, str],
-    item_20_body_text: str,
-) -> dict:
-    user_prompt = json.dumps(
-        {
-            "exhibit_titles": exhibit_titles,
-            "item_20_body_text": item_20_body_text[:6000],
-        }
-    )
-    raw = complete(SYSTEM_PROMPT, user_prompt, max_tokens=512)
+def locate_franchisee_list_via_agent(locator_context: str) -> dict:
+    raw = complete(SYSTEM_PROMPT, locator_context, max_tokens=512)
     try:
         result = json.loads(raw)
     except json.JSONDecodeError:

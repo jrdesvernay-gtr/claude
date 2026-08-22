@@ -1,6 +1,7 @@
 from pipeline.parsing.format_detection import (
     find_referenced_exhibit_letters,
     find_roster_exhibit_letter,
+    gather_locator_context,
     list_exhibit_titles,
     locate_franchisee_list_section_heuristic,
     locate_item_20_section,
@@ -242,3 +243,27 @@ def test_handles_double_letter_exhibit_codes():
     assert source == "exhibit_AA"
     assert "Sunrise Restaurant Group LLC" in section
     assert "Some Transfer LLC" not in section
+
+
+def test_gather_locator_context_finds_item_20_and_exhibit_mentions():
+    context = gather_locator_context(SAMPLE_FDD_WENDYS_LIKE)
+    assert "ITEM 20" in context.upper()
+    assert "EXHIBIT O" in context.upper()
+    assert "EXHIBIT P" in context.upper()
+    assert "EXHIBIT R" in context.upper()
+    # each snippet is tagged with its raw character position so the agent
+    # can reason about which occurrence is real
+    assert "[@" in context
+
+
+def test_gather_locator_context_is_case_insensitive():
+    # Mirrors the real Taco Bell case: "Item 20" title-case, not "ITEM 20".
+    text = "Item 20\nUNITS AND LICENSEE INFORMATION\nSome body text."
+    context = gather_locator_context(text)
+    assert "[@0]" in context
+
+
+def test_gather_locator_context_respects_max_chars():
+    text = "\n".join(f"EXHIBIT {chr(65 + i % 26)} some filler text here" for i in range(500))
+    context = gather_locator_context(text, max_chars=500)
+    assert len(context) <= 500
