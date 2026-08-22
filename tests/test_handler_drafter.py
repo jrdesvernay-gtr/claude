@@ -95,6 +95,17 @@ def parse(item_20_text: str) -> list[dict]:
 """
 
 
+def test_syntax_error_in_drafted_code_raises_with_code_visible():
+    # Confirmed live: Wendy's drafted handler had a genuine syntax error
+    # (unterminated string literal), most likely from embedding a snippet
+    # of real sample data containing a stray quote/apostrophe directly
+    # into a string literal.
+    broken_code = 'def parse(item_20_text):\n    x = "unterminated\n    return []\n'
+    with patch(COMPLETE, return_value=broken_code):
+        with pytest.raises(ValueError, match="invalid Python syntax"):
+            draft_handler("WI", "x\n", {"delimiter": "fixed_width"})
+
+
 def test_drafted_code_using_isinstance_executes():
     # Confirmed live: the original builtins whitelist (len/range/str/int
     # only) was too narrow for realistic parsing code -- a drafted handler

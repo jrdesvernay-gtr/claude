@@ -114,7 +114,17 @@ def draft_handler(state: str, item_20_sample: str, fingerprint: dict) -> tuple[s
         "re": re,
     }
     sandbox_locals: dict = {}
-    exec(code, sandbox_globals, sandbox_locals)  # noqa: S102 - sandboxed namespace, reviewed above
+    try:
+        exec(code, sandbox_globals, sandbox_locals)  # noqa: S102 - sandboxed namespace, reviewed above
+    except SyntaxError as exc:
+        # Confirmed live: Wendy's drafted handler had a genuine syntax
+        # error (unterminated string literal), most likely from embedding
+        # a snippet of real sample data -- which can contain stray quotes/
+        # apostrophes (e.g. real entity names like "Tasty Chick'n...") --
+        # directly into a string literal in the generated code. Surface
+        # the actual broken code instead of letting a bare SyntaxError
+        # propagate with no way to see what the draft looked like.
+        raise ValueError(f"Agent 1 draft has invalid Python syntax: {exc}\nCode:\n{code[:2000]}") from exc
     raw_fn = sandbox_locals["parse"]
 
     def fn(item_20_text: str) -> list[ItemRow]:
