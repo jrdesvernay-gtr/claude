@@ -10,6 +10,7 @@ being skipped is visible, not just theoretical.
 Usage:
     python3 scripts/test_load_to_supabase.py                     # all PDFs in data/downloads/
     python3 scripts/test_load_to_supabase.py data/downloads/wi_Taco_Bell.pdf
+    python3 scripts/test_load_to_supabase.py --limit 200          # override MAX_ROWS_TO_LOAD
 """
 from __future__ import annotations
 
@@ -31,6 +32,14 @@ from pipeline.parsing.handler_registry import registry  # noqa: E402
 
 DOWNLOAD_DIR = Path(__file__).resolve().parent.parent / "data" / "downloads"
 
+# Temporary cap while we're still testing this path -- McDonald's alone
+# parsed 12,179 rows, and entity resolution calls Agent 2 (a live LLM call)
+# per AMBIGUOUS fuzzy match, with no retry/resilience yet. A transient
+# network blip mid-run already killed one full load. Capping row volume
+# keeps test runs fast/cheap and low-risk while we validate correctness,
+# without needing retry logic built first just to finish one test.
+MAX_ROWS_TO_LOAD = 50
+
 # franchisor name derived from filename, e.g. "wi_Taco_Bell.pdf" -> "Taco Bell"
 def franchisor_name_from_path(pdf_path: Path) -> str:
     stem = pdf_path.stem
@@ -49,7 +58,7 @@ def extract_full_text(pdf_path: Path) -> str:
     return "\n".join(parts)
 
 
-def load_one(pdf_path: Path, client) -> None:
+def load_one(pdf_path: Path, client, row_limit: int) -> None:
     print(f"\n{'=' * 70}\n{pdf_path.name}\n{'=' * 70}")
 
     franchisor_name = franchisor_name_from_path(pdf_path)
@@ -71,6 +80,13 @@ def load_one(pdf_path: Path, client) -> None:
     print(f"  Parsed rows: {filing.parsed_row_count} | Table 1 disclosed: {filing.table1_outlet_count}")
     print(f"  Table 1 match: {filing.table1_match} | REVIEW FLAG: {filing.review_flag}")
 
+    # Table 1 cross-check above already ran against the FULL parse (that's
+    # what determines review_flag/table1_match, unaffected by this cap) --
+    # only what actually gets loaded into Supabase is capped here.
+    if len(rows) > row_limit:
+        print(f"  Capping load to {row_limit} of {len(rows)} parsed rows (MAX_ROWS_TO_LOAD)")
+        rows = rows[:row_limit]
+
     fdd_filing_id = load_filing_to_db(client, franchisor_name, None, filing, rows)
     print(f"  Loaded. fdd_filing_id={fdd_filing_id}")
 
@@ -80,14 +96,22 @@ def load_one(pdf_path: Path, client) -> None:
 
 
 if __name__ == "__main__":
-    paths = [Path(p) for p in sys.argv[1:]] or sorted(DOWNLOAD_DIR.glob("*.pdf"))
+    args = sys.argv[1:]
+    row_limit = MAX_ROWS_TO_LOAD
+    if "--limit" in args:
+        i = args.index("--limit")
+        row_limit = int(args[i + 1])
+        del args[i : i + 2]
+
+    paths = [Path(p) for p in args] or sorted(DOWNLOAD_DIR.glob("*.pdf"))
     if not paths:
         print(f"No PDFs found in {DOWNLOAD_DIR} and none passed as args.")
         sys.exit(1)
 
+    print(f"(Capping units loaded per filing to {row_limit} rows)")
     client = db.get_client()
     loaded = bootstrap_handler_registry(client)
     print(f"(Loaded {loaded} persisted agent-drafted handler(s) from Supabase)")
 
     for p in paths:
-        load_one(p, client)
+        load_one(p, client, row_limit)
