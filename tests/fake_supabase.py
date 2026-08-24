@@ -49,6 +49,16 @@ class _Query:
         return self
 
     def execute(self):
+        if self.op == "delete":
+            remaining, removed = [], []
+            for r in self.table.rows:
+                if self._eq_field and r.get(self._eq_field) == self._eq_value:
+                    removed.append(r)
+                else:
+                    remaining.append(r)
+            self.table.rows[:] = remaining
+            return _Result(removed)
+
         if self.op == "select":
             rows = self.table.rows
             if self._eq_field:
@@ -103,6 +113,9 @@ class _Table:
 
     def insert(self, payload):
         return _Query(self, "insert", payload)
+
+    def delete(self):
+        return _Query(self, "delete")
 
     def update(self, payload):
         return _Query(self, "update", payload)

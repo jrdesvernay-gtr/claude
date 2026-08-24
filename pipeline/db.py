@@ -108,10 +108,22 @@ def insert_units(
     franchisee_ids: list[str | None],
     batch_size: int = 500,
 ) -> None:
+    if rows and len(rows) != len(franchisee_ids):
+        raise ValueError("rows and franchisee_ids must be the same length (one franchisee_id per row)")
+
+    # Idempotent per filing: clear any units from a previous load of this
+    # same fdd_filing_id before inserting fresh ones. insert_fdd_filing()
+    # upserts on (franchisor_id, state, source_url), so reprocessing an
+    # already-loaded filing (e.g. re-running a load script against the same
+    # PDF, or reprocessing after a handler fix) reuses the same
+    # fdd_filing_id -- without this delete, units were append-only and
+    # accumulated duplicates on every re-run (confirmed live: re-running
+    # scripts/test_load_to_supabase.py against the same 3 PDFs doubled
+    # every filing's unit count, 50 -> 100, under the same fdd_filing_id).
+    client.table("units").delete().eq("fdd_filing_id", fdd_filing_id).execute()
+
     if not rows:
         return
-    if len(rows) != len(franchisee_ids):
-        raise ValueError("rows and franchisee_ids must be the same length (one franchisee_id per row)")
 
     payload = [
         {

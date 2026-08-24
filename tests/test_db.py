@@ -72,6 +72,19 @@ def test_insert_units_normalizes_state_across_different_raw_forms():
     assert states == ["AK", "NC", "AR", None]
 
 
+def test_insert_units_reload_is_idempotent_not_additive():
+    # Confirmed live: re-running a load script against the same PDF reused
+    # the same fdd_filing_id (insert_fdd_filing upserts on
+    # franchisor_id/state/source_url) but doubled the unit count, because
+    # insert_units was append-only. Reprocessing the same filing must
+    # replace its units, not accumulate duplicates alongside them.
+    client = FakeSupabaseClient()
+    rows = [ItemRow(franchisee_raw="A LLC"), ItemRow(franchisee_raw="B LLC")]
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2"])
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2"])
+    assert len(client.data["units"]) == 2
+
+
 def test_fetch_units_by_state_filters_on_normalized_code():
     client = FakeSupabaseClient()
     rows = [
