@@ -107,7 +107,7 @@ create table if not exists units (
     franchisee_raw        text not null,   -- verbatim Item 20 franchisee field, incl. guarantor names
     address                text,
     city                   text,
-    state                  text,
+    state                  text,          -- always a canonical 2-letter USPS code (pipeline.parsing.state_normalization.normalize_state); NULL if unrecognized, never raw text
     zip                     text,
     phone                    text,
     status                   text,          -- e.g. operating / transferred / terminated, as disclosed

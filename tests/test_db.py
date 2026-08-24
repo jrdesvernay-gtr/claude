@@ -52,3 +52,34 @@ def test_insert_units_writes_all_rows():
     assert len(client.data["units"]) == 2
     assert client.data["units"][0]["franchisee_raw"] == "A LLC"
     assert client.data["units"][1]["franchisee_id"] == "fr-2"
+
+
+def test_insert_units_normalizes_state_across_different_raw_forms():
+    # Confirmed live: different franchisors' handlers emit different but
+    # individually-correct state forms (McDonald's: "AK", Wendy's:
+    # "NORTH CAROLINA", Taco Bell: "AR-Arkansas"). insert_units() must
+    # normalize all of them to the same canonical 2-letter code so a
+    # state-filtered query finds all three.
+    client = FakeSupabaseClient()
+    rows = [
+        ItemRow(franchisee_raw="McD Franchisee", state="AK"),
+        ItemRow(franchisee_raw="Wendy Franchisee", state="NORTH CAROLINA"),
+        ItemRow(franchisee_raw="Taco Franchisee", state="AR-Arkansas"),
+        ItemRow(franchisee_raw="Unrecognized Franchisee", state="Not A State"),
+    ]
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2", "fr-3", "fr-4"])
+    states = [row["state"] for row in client.data["units"]]
+    assert states == ["AK", "NC", "AR", None]
+
+
+def test_fetch_units_by_state_filters_on_normalized_code():
+    client = FakeSupabaseClient()
+    rows = [
+        ItemRow(franchisee_raw="A LLC", state="NORTH CAROLINA"),
+        ItemRow(franchisee_raw="B LLC", state="AK"),
+    ]
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2"])
+
+    nc_units = db.fetch_units_by_state(client, "NC")
+    assert len(nc_units) == 1
+    assert nc_units[0]["franchisee_raw"] == "A LLC"

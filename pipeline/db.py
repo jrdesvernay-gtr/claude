@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 
 from pipeline.models import FddFiling, FranchiseeCandidate, ItemRow
+from pipeline.parsing.state_normalization import normalize_state
 
 
 def get_client():
@@ -119,7 +120,16 @@ def insert_units(
             "franchisee_raw": row.franchisee_raw,
             "address": row.address,
             "city": row.city,
-            "state": row.state,
+            # Normalized to a canonical 2-letter USPS code here, not left
+            # as whatever the handler emitted -- confirmed live, different
+            # franchisors' handlers emit different but individually-correct
+            # forms (McDonald's: "AK", Wendy's: "NORTH CAROLINA", Taco
+            # Bell: "AR-Arkansas"). Storing them as-is would make
+            # `WHERE state = 'NC'` silently miss whichever franchisors
+            # don't use that exact form. Unnormalizable values become NULL
+            # (fail-safe) rather than storing raw text that would silently
+            # break state-filtered queries.
+            "state": normalize_state(row.state),
             "zip": row.zip,
             "phone": row.phone,
             "status": row.status,
@@ -128,6 +138,22 @@ def insert_units(
     ]
     for i in range(0, len(payload), batch_size):
         client.table("units").insert(payload[i : i + batch_size]).execute()
+
+
+def fetch_units_by_state(client, state_code: str, limit: int = 1000) -> list[dict]:
+    """Units for prospecting, filtered to one state. `state_code` must
+    already be a canonical 2-letter USPS code (see normalize_state()) --
+    insert_units() normalizes on write, so this is a plain equality filter,
+    no fuzzy matching needed at query time.
+    """
+    result = (
+        client.table("units")
+        .select("*")
+        .eq("state", state_code.strip().upper())
+        .limit(limit)
+        .execute()
+    )
+    return result.data
 
 
 def sync_handler_registry(client, handler) -> None:
