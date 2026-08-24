@@ -47,6 +47,7 @@ def insert_fdd_filing(client, filing: FddFiling, franchisor_id: str) -> str:
         "table1_outlet_count": filing.table1_outlet_count,
         "parsed_row_count": filing.parsed_row_count,
         "table1_match": filing.table1_match,
+        "unmatched_line_count": filing.unmatched_line_count,
         "review_flag": filing.review_flag,
         "raw_document_path": filing.raw_document_path,
     }

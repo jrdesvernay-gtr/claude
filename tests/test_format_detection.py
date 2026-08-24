@@ -1,4 +1,5 @@
 from pipeline.parsing.format_detection import (
+    count_unmatched_lines,
     find_referenced_exhibit_letters,
     find_roster_exhibit_letter,
     gather_locator_context,
@@ -322,3 +323,20 @@ def test_locate_exhibit_section_skips_front_matter_toc_mention():
     section = locate_exhibit_section(SAMPLE_FDD_MULTI_PAGE_EXHIBIT, "R")
     assert section is not None
     assert "LIST OF FRANCHISEES" not in section  # the TOC entry, not real content
+
+
+def test_count_unmatched_lines_all_captured():
+    assert count_unmatched_lines(data_line_count=500, parsed_row_count=500) == 0
+
+
+def test_count_unmatched_lines_some_skipped():
+    # e.g. a handler drafted on a comma-delimited sample that silently
+    # skips later pipe-delimited rows via its per-line try/except.
+    assert count_unmatched_lines(data_line_count=500, parsed_row_count=320) == 180
+
+
+def test_count_unmatched_lines_never_negative():
+    # parsed_row_count can exceed the loose data_line_count heuristic (a
+    # multi-line row, or a row without a 3+ digit run counted elsewhere) --
+    # that's not evidence of a skip, so this must not report a negative count.
+    assert count_unmatched_lines(data_line_count=100, parsed_row_count=140) == 0

@@ -304,13 +304,16 @@ def locate_franchisee_list_section_heuristic(full_text: str) -> tuple[str, str] 
     return None
 
 
+DATA_LINE_RE = re.compile(r"\d{3,}")  # a line with an address/zip/phone-shaped number run
+
+
 def structural_fingerprint(item_20_text: str) -> dict:
     """Cheap structural probes used to route to a handler: delimiter guess,
     column count on the densest line, whether rows look pipe/tab/comma
     delimited vs. fixed-width.
     """
     lines = [ln for ln in item_20_text.splitlines() if ln.strip()]
-    data_lines = [ln for ln in lines if re.search(r"\d{3,}", ln)]  # lines with addresses/zips/phones
+    data_lines = [ln for ln in lines if DATA_LINE_RE.search(ln)]  # lines with addresses/zips/phones
 
     def count_delim(delim: str) -> int:
         if not data_lines:
@@ -335,3 +338,26 @@ def structural_fingerprint(item_20_text: str) -> dict:
         "data_line_count": len(data_lines),
         "has_semicolon_franchisee_field": any(";" in ln for ln in data_lines),
     }
+
+
+def count_unmatched_lines(data_line_count: int, parsed_row_count: int) -> int:
+    """Step 3.4 safety net: how many row-shaped lines in the section handed
+    to a drafted handler weren't captured by parse().
+
+    A drafted handler's regex/split logic is written from a sample of the
+    section (see handler_drafter.draft_handler), but then runs against the
+    WHOLE section deterministically. If the format changes partway through
+    the document (e.g. comma-delimited early, pipe-delimited later) after
+    the handler was drafted on an early-only sample, later lines simply
+    won't match -- and every drafted handler wraps each line in
+    try/except: continue, so a non-matching line produces no error, just a
+    silently low parsed_row_count. The Table 1 cross-check tolerance
+    (pipeline.parsing.table1_crosscheck) catches large losses but can miss
+    small ones; this makes the loss itself visible regardless of size.
+
+    Takes counts, not raw text, so callers reuse the data_line_count
+    structural_fingerprint() already computed on the same section in one
+    pass -- this needs no second scan of a possibly 30,000-line document,
+    just a subtraction.
+    """
+    return max(0, data_line_count - parsed_row_count)

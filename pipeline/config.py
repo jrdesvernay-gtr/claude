@@ -53,6 +53,17 @@ CONTACT_SYNC_THRESHOLD = 0.70
 # percentages.
 TABLE1_MATCH_TOLERANCE = 0.12
 
+# Unmatched-line safety net (Step 3.4): how large a share of row-shaped
+# lines in a section a drafted handler is allowed to silently skip before
+# it also trips review_flag, independent of the Table 1 tolerance above.
+# "Row-shaped" (structural_fingerprint's data_line_count) is a loose count
+# -- it also catches footer/page-number/subtotal lines that aren't real
+# rows -- so some nonzero unmatched share is expected even from a correct
+# parse. Not yet confirmed against real noisy filings the way
+# TABLE1_MATCH_TOLERANCE was; starts at the same order of magnitude and
+# should be tuned once real mismatches (or false positives) are observed.
+UNMATCHED_LINE_TOLERANCE = 0.15
+
 
 @dataclass(frozen=True)
 class PortalConfig:

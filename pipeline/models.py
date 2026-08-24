@@ -35,6 +35,7 @@ class FddFiling:
     table1_outlet_count: int | None = None
     parsed_row_count: int | None = None
     table1_match: bool | None = None
+    unmatched_line_count: int | None = None
     review_flag: bool = False
     raw_document_path: str | None = None
     downloaded_at: datetime = field(default_factory=datetime.utcnow)

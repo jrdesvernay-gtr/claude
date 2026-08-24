@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import logging
 
-from pipeline.config import v1_scoped_portals
+from pipeline.config import UNMATCHED_LINE_TOLERANCE, v1_scoped_portals
 from pipeline.parsing import handlers  # noqa: F401 - registers built-in handlers
 from pipeline.parsing.format_detection import (
+    count_unmatched_lines,
     gather_locator_context,
     is_text_native,
     locate_exhibit_section,
@@ -170,6 +171,17 @@ def parse_item_20(state: str, full_text: str) -> tuple[FddFiling, list]:
         section_locator_confidence=section_locator_confidence,
     )
     filing = apply_crosscheck(filing, rows, item_20_body_text)
+
+    # Post-hoc unmatched-line detection: catches a drafted handler's regex
+    # silently failing to match some of the section's row-shaped lines
+    # (e.g. a mid-document delimiter change the drafting sample never saw)
+    # even when the shortfall is too small to trip the Table 1 tolerance
+    # gate above on its own. See count_unmatched_lines()'s docstring.
+    filing.unmatched_line_count = count_unmatched_lines(fingerprint["data_line_count"], len(rows))
+    if fingerprint["data_line_count"] > 0:
+        unmatched_ratio = filing.unmatched_line_count / fingerprint["data_line_count"]
+        if unmatched_ratio > UNMATCHED_LINE_TOLERANCE:
+            filing.review_flag = True
 
     if not filing.review_flag:
         registry.record_clean_run(handler.id)  # advances agent-drafted handlers off probation

@@ -41,7 +41,8 @@ create table if not exists fdd_filings (
     table1_outlet_count    int,                          -- Item 20 Table No. 1 self-disclosed total
     parsed_row_count       int,                          -- rows actually parsed from the exhibit
     table1_match           boolean,                      -- table1_outlet_count = parsed_row_count
-    review_flag            boolean not null default false, -- set true on Table 1 mismatch; blocks unit load
+    unmatched_line_count   int,                          -- row-shaped lines the handler didn't capture (see pipeline.parsing.format_detection.count_unmatched_lines)
+    review_flag            boolean not null default false, -- set true on Table 1 mismatch or unmatched-line ratio over tolerance; blocks unit load
     raw_document_path      text,                         -- object storage path for the source PDF
     created_at             timestamptz not null default now(),
     unique (franchisor_id, state, source_url)
