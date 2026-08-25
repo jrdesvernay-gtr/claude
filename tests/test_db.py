@@ -1,0 +1,141 @@
+from pipeline import db
+from pipeline.models import FddFiling, FranchiseeCandidate, ItemRow
+from tests.fake_supabase import FakeSupabaseClient
+
+
+def test_upsert_franchisor_creates_then_reuses():
+    client = FakeSupabaseClient()
+    id1 = db.upsert_franchisor(client, "Wendy's", "https://www.wendys.com")
+    id2 = db.upsert_franchisor(client, "Wendy's")
+    assert id1 == id2
+    assert len(client.data["franchisors"]) == 1
+
+
+def test_insert_fdd_filing_upserts_on_unique_key():
+    client = FakeSupabaseClient()
+    franchisor_id = db.upsert_franchisor(client, "Wendy's")
+    filing = FddFiling(franchisor_name="Wendy's", state="WI", source_url="http://x", parsed_row_count=2)
+    id1 = db.insert_fdd_filing(client, filing, franchisor_id)
+    id2 = db.insert_fdd_filing(client, filing, franchisor_id)
+    assert id1 == id2
+    assert len(client.data["fdd_filings"]) == 1
+
+
+def test_upsert_franchisee_insert_then_merge():
+    client = FakeSupabaseClient()
+    candidate = FranchiseeCandidate(legal_name="Sunrise Restaurant Group LLC", guarantor_names=["John Smith"])
+    fid = db.upsert_franchisee(client, candidate)
+    assert len(client.data["franchisees"]) == 1
+    assert client.data["franchisees"][0]["guarantor_names"] == ["John Smith"]
+
+    # merging onto the existing row should not clobber legal_name with an empty update
+    merged_id = db.upsert_franchisee(client, FranchiseeCandidate(legal_name="Sunrise Restaurant Group LLC"), franchisee_id=fid)
+    assert merged_id == fid
+    assert len(client.data["franchisees"]) == 1
+
+
+def test_insert_units_requires_matching_lengths():
+    client = FakeSupabaseClient()
+    rows = [ItemRow(franchisee_raw="A LLC")]
+    try:
+        db.insert_units(client, rows, "filing-1", "franchisor-1", [])
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("expected ValueError on mismatched lengths")
+
+
+def test_insert_units_writes_all_rows():
+    client = FakeSupabaseClient()
+    rows = [ItemRow(franchisee_raw="A LLC"), ItemRow(franchisee_raw="B LLC")]
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2"])
+    assert len(client.data["units"]) == 2
+    assert client.data["units"][0]["franchisee_raw"] == "A LLC"
+    assert client.data["units"][1]["franchisee_id"] == "fr-2"
+
+
+def test_insert_units_normalizes_state_across_different_raw_forms():
+    # Confirmed live: different franchisors' handlers emit different but
+    # individually-correct state forms (McDonald's: "AK", Wendy's:
+    # "NORTH CAROLINA", Taco Bell: "AR-Arkansas"). insert_units() must
+    # normalize all of them to the same canonical 2-letter code so a
+    # state-filtered query finds all three.
+    client = FakeSupabaseClient()
+    rows = [
+        ItemRow(franchisee_raw="McD Franchisee", state="AK"),
+        ItemRow(franchisee_raw="Wendy Franchisee", state="NORTH CAROLINA"),
+        ItemRow(franchisee_raw="Taco Franchisee", state="AR-Arkansas"),
+        ItemRow(franchisee_raw="Unrecognized Franchisee", state="Not A State"),
+    ]
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2", "fr-3", "fr-4"])
+    states = [row["state"] for row in client.data["units"]]
+    assert states == ["AK", "NC", "AR", None]
+
+
+def test_insert_units_reload_is_idempotent_not_additive():
+    # Confirmed live: re-running a load script against the same PDF reused
+    # the same fdd_filing_id (insert_fdd_filing upserts on
+    # franchisor_id/state/source_url) but doubled the unit count, because
+    # insert_units was append-only. Reprocessing the same filing must
+    # replace its units, not accumulate duplicates alongside them.
+    client = FakeSupabaseClient()
+    rows = [ItemRow(franchisee_raw="A LLC"), ItemRow(franchisee_raw="B LLC")]
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2"])
+    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2"])
+    assert len(client.data["units"]) == 2
+
+
+def _seed_two_brand_units(client):
+    # franchisee_units_view inner-joins units to franchisees and
+    # franchisors, so fetch_units() needs real rows in all three tables,
+    # not the bare placeholder ids insert_units() alone accepts.
+    wendys_id = db.upsert_franchisor(client, "Wendy's")
+    mcd_id = db.upsert_franchisor(client, "McDonald's")
+    fr1 = db.upsert_franchisee(client, FranchiseeCandidate(legal_name="A LLC"))
+    fr2 = db.upsert_franchisee(client, FranchiseeCandidate(legal_name="B LLC"))
+
+    db.insert_units(
+        client,
+        [ItemRow(franchisee_raw="A LLC", state="NORTH CAROLINA")],
+        "filing-1", wendys_id, [fr1],
+    )
+    db.insert_units(
+        client,
+        [ItemRow(franchisee_raw="B LLC", state="AK")],
+        "filing-2", mcd_id, [fr2],
+    )
+    return wendys_id, mcd_id, fr1, fr2
+
+
+def test_fetch_units_filters_on_normalized_state_code():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    nc_units = db.fetch_units(client, state_code="NC")
+    assert len(nc_units) == 1
+    assert nc_units[0]["legal_name"] == "A LLC"
+    assert nc_units[0]["brand_name"] == "Wendy's"
+
+
+def test_fetch_units_filters_on_brand_name():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    mcd_units = db.fetch_units(client, brand_name="McDonald's")
+    assert len(mcd_units) == 1
+    assert mcd_units[0]["legal_name"] == "B LLC"
+
+
+def test_fetch_units_combines_state_and_brand_filters():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    assert db.fetch_units(client, state_code="NC", brand_name="Wendy's") != []
+    assert db.fetch_units(client, state_code="NC", brand_name="McDonald's") == []
+
+
+def test_fetch_units_with_no_filters_returns_everything():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    assert len(db.fetch_units(client)) == 2

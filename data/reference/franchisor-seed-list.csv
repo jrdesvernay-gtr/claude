@@ -1,0 +1,11 @@
+rank,name,website,verification_status,notes
+1,Subway,https://www.subway.com,unverified,"Top 10 QSR brand by Franchimp-reported unit count. Not yet individually re-verified against WI/MN portals — Step 3 search-and-download confirms per-brand on first run."
+2,McDonald's,https://www.mcdonalds.com,unverified,"Same as above."
+3,Dunkin',https://www.dunkindonuts.com,unverified,"Same as above."
+4,Taco Bell,https://www.tacobell.com,unverified,"Same as above."
+5,Domino's Pizza,https://www.dominos.com,unverified,"Same as above."
+6,Wendy's,https://www.wendys.com,verified,"Proven end-to-end: WI filing parsed (5,943 outlet rows / 576 distinct franchisee entities). See wendys-top50-multiunit-franchisees.csv."
+7,Burger King,https://www.bk.com,unverified,"Same as row 1."
+8,Pizza Hut,https://www.pizzahut.com,unverified,"Same as row 1."
+9,Little Caesars,https://www.littlecaesars.com,unverified,"Same as row 1."
+10,KFC,https://www.kfc.com,unverified,"Same as row 1."
