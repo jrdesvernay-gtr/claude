@@ -85,14 +85,57 @@ def test_insert_units_reload_is_idempotent_not_additive():
     assert len(client.data["units"]) == 2
 
 
-def test_fetch_units_by_state_filters_on_normalized_code():
-    client = FakeSupabaseClient()
-    rows = [
-        ItemRow(franchisee_raw="A LLC", state="NORTH CAROLINA"),
-        ItemRow(franchisee_raw="B LLC", state="AK"),
-    ]
-    db.insert_units(client, rows, "filing-1", "franchisor-1", ["fr-1", "fr-2"])
+def _seed_two_brand_units(client):
+    # franchisee_units_view inner-joins units to franchisees and
+    # franchisors, so fetch_units() needs real rows in all three tables,
+    # not the bare placeholder ids insert_units() alone accepts.
+    wendys_id = db.upsert_franchisor(client, "Wendy's")
+    mcd_id = db.upsert_franchisor(client, "McDonald's")
+    fr1 = db.upsert_franchisee(client, FranchiseeCandidate(legal_name="A LLC"))
+    fr2 = db.upsert_franchisee(client, FranchiseeCandidate(legal_name="B LLC"))
 
-    nc_units = db.fetch_units_by_state(client, "NC")
+    db.insert_units(
+        client,
+        [ItemRow(franchisee_raw="A LLC", state="NORTH CAROLINA")],
+        "filing-1", wendys_id, [fr1],
+    )
+    db.insert_units(
+        client,
+        [ItemRow(franchisee_raw="B LLC", state="AK")],
+        "filing-2", mcd_id, [fr2],
+    )
+    return wendys_id, mcd_id, fr1, fr2
+
+
+def test_fetch_units_filters_on_normalized_state_code():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    nc_units = db.fetch_units(client, state_code="NC")
     assert len(nc_units) == 1
-    assert nc_units[0]["franchisee_raw"] == "A LLC"
+    assert nc_units[0]["legal_name"] == "A LLC"
+    assert nc_units[0]["brand_name"] == "Wendy's"
+
+
+def test_fetch_units_filters_on_brand_name():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    mcd_units = db.fetch_units(client, brand_name="McDonald's")
+    assert len(mcd_units) == 1
+    assert mcd_units[0]["legal_name"] == "B LLC"
+
+
+def test_fetch_units_combines_state_and_brand_filters():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    assert db.fetch_units(client, state_code="NC", brand_name="Wendy's") != []
+    assert db.fetch_units(client, state_code="NC", brand_name="McDonald's") == []
+
+
+def test_fetch_units_with_no_filters_returns_everything():
+    client = FakeSupabaseClient()
+    _seed_two_brand_units(client)
+
+    assert len(db.fetch_units(client)) == 2

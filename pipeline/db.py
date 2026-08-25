@@ -153,19 +153,34 @@ def insert_units(
         client.table("units").insert(payload[i : i + batch_size]).execute()
 
 
-def fetch_units_by_state(client, state_code: str, limit: int = 1000) -> list[dict]:
-    """Units for prospecting, filtered to one state. `state_code` must
-    already be a canonical 2-letter USPS code (see normalize_state()) --
-    insert_units() normalizes on write, so this is a plain equality filter,
-    no fuzzy matching needed at query time.
+def fetch_units(
+    client,
+    state_code: str | None = None,
+    brand_name: str | None = None,
+    limit: int = 1000,
+) -> list[dict]:
+    """Units for prospecting, optionally filtered by state and/or brand.
+
+    Queries franchisee_units_view, not the raw `units` table -- `units`
+    only carries franchisor_id/franchisee_id foreign keys, no brand name
+    or legal_name, so a prospecting query against the raw table would need
+    a second lookup per row just to know which brand or which resolved
+    franchisee entity a unit belongs to. The view already joins
+    franchisors/franchisees in (see sql/schema.sql), so this is a plain
+    filtered select.
+
+    `state_code` must already be a canonical 2-letter USPS code (see
+    normalize_state()) -- insert_units() normalizes on write, so this is a
+    plain equality filter, no fuzzy matching needed at query time.
+    `brand_name` matches franchisors.name exactly (also written verbatim by
+    upsert_franchisor(), no normalization needed there).
     """
-    result = (
-        client.table("units")
-        .select("*")
-        .eq("state", state_code.strip().upper())
-        .limit(limit)
-        .execute()
-    )
+    query = client.table("franchisee_units_view").select("*")
+    if state_code:
+        query = query.eq("state", state_code.strip().upper())
+    if brand_name:
+        query = query.eq("brand_name", brand_name)
+    result = query.limit(limit).execute()
     return result.data
 
 

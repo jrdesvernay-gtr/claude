@@ -18,8 +18,7 @@ class _Query:
         self.table = table
         self.op = op
         self.payload = payload
-        self._eq_field = None
-        self._eq_value = None
+        self._eq_filters: list[tuple[str, object]] = []
         self._not_null_field = None
         self._limit = None
         self._select_cols = None
@@ -30,9 +29,15 @@ class _Query:
         return self
 
     def eq(self, field, value):
-        self._eq_field = field
-        self._eq_value = value
+        # Chainable, like real supabase-py -- .eq(a, 1).eq(b, 2) means
+        # both must match, not "the last .eq() call wins".
+        self._eq_filters.append((field, value))
         return self
+
+    def _apply_eq_filters(self, rows):
+        for field, value in self._eq_filters:
+            rows = [r for r in rows if r.get(field) == value]
+        return rows
 
     @property
     def not_(self):
@@ -49,10 +54,18 @@ class _Query:
         return self
 
     def execute(self):
+        if self.op == "select" and self.table.name == "franchisee_units_view":
+            rows = self.table.client.compute_franchisee_units_view()
+            rows = self._apply_eq_filters(rows)
+            if self._limit:
+                rows = rows[: self._limit]
+            return _Result(rows)
+
         if self.op == "delete":
+            eq_field, eq_value = self._eq_filters[0] if self._eq_filters else (None, None)
             remaining, removed = [], []
             for r in self.table.rows:
-                if self._eq_field and r.get(self._eq_field) == self._eq_value:
+                if eq_field and r.get(eq_field) == eq_value:
                     removed.append(r)
                 else:
                     remaining.append(r)
@@ -60,9 +73,7 @@ class _Query:
             return _Result(removed)
 
         if self.op == "select":
-            rows = self.table.rows
-            if self._eq_field:
-                rows = [r for r in rows if r.get(self._eq_field) == self._eq_value]
+            rows = self._apply_eq_filters(self.table.rows)
             if self._not_null_field:
                 rows = [r for r in rows if r.get(self._not_null_field) is not None]
             if self._limit:
@@ -82,7 +93,7 @@ class _Query:
             return _Result(inserted)
 
         if self.op == "update":
-            matched = [r for r in self.table.rows if r.get(self._eq_field) == self._eq_value]
+            matched = self._apply_eq_filters(self.table.rows)
             for row in matched:
                 row.update(self.payload)
             return _Result(matched)
@@ -133,3 +144,34 @@ class FakeSupabaseClient:
 
     def table(self, name: str) -> _Table:
         return _Table(self, name)
+
+    def compute_franchisee_units_view(self) -> list[dict]:
+        """Mirrors sql/schema.sql's franchisee_units_view: units inner-
+        joined to their resolved franchisee and franchisor. Like the real
+        view, a unit with no matching franchisee/franchisor row (e.g.
+        franchisee_id left null) is excluded, not returned with nulls.
+        """
+        franchisees = {f["id"]: f for f in self.data.get("franchisees", [])}
+        franchisors = {fr["id"]: fr for fr in self.data.get("franchisors", [])}
+        rows = []
+        for u in self.data.get("units", []):
+            f = franchisees.get(u.get("franchisee_id"))
+            fr = franchisors.get(u.get("franchisor_id"))
+            if f is None or fr is None:
+                continue
+            rows.append(
+                {
+                    "franchisee_id": f["id"],
+                    "legal_name": f["legal_name"],
+                    "unit_id": u["id"],
+                    "franchisor_id": u["franchisor_id"],
+                    "brand_name": fr["name"],
+                    "address": u.get("address"),
+                    "city": u.get("city"),
+                    "state": u.get("state"),
+                    "zip": u.get("zip"),
+                    "phone": u.get("phone"),
+                    "status": u.get("status"),
+                }
+            )
+        return rows
